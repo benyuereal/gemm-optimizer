@@ -91,3 +91,21 @@ Cijk_Alik_Bljk_F8BS_MT{tileM}x{tileN}x{tileK}_TT*_WG*_MFWGS*_WGM*_bias_channelwi
 - **只看单个 shape**：M=64 和 M=128 行为不同（基线参考里 M 翻倍时间 +39~37%），达标判断看全部相关 kernel/shape。
 - **不记录环境**：.co md5 / GPU 号 / DTK 版本 / rounds 缺一样，事后无法复现，数字作废。
 - **warmup 不够**：首轮含冷启动，必须 ≥ 3 轮取中位数。
+
+## bf16 GEMM 实测（qwen3-32b shape，干净独占卡 L2-flush 冷缓存）
+
+**bf16 走 Tensile 的 Cijk kernel（`TensileLibrary_gfx938.co`, ~774MB），不是 FusedMatmul。**
+工具：`tests/bw_util_bench.py`（torch.matmul + 空闲卡检查 + L2 flush），或 `hipblaslt-bench --print_kernel_info`。
+
+| shape（权重） | M=16 | M=32 | M=64 | M=128 |
+|---|---|---|---|---|
+| gate_up (524MB) | 76.4% | 68.3% | 69.6% | 49.2% |
+| down (262MB) | 82.5% | 73.6% | 54.3% | 30.1% |
+| qkv (104MB) | 75.4% | 67.2% | 52.8% | 42.7% |
+| o (83MB) | 55.3% | 50.4% | 43.1% | 31.6% |
+
+结论：
+1. **生产 M=32 基本达标**（gate_up 68.3 / down 73.6 / qkv 67.2，贴 M≤64 的 70% 线）。o 50% 是小 N ramp-limited，正常。
+2. **曾在共享卡看到 "M=64 断崖"（39%/12%）是争抢污染，不是 kernel 选错 tile**——干净卡 M=64 与 M=32 持平。**计时必须独占空闲卡**，否则数字作废。
+3. **slc 对 bf16 比特级可打**：Cijk kernel 权重加载是 `buffer_load_dwordx4 ... offen lds`，编码 `E05D1000`，与 fp8 slc 同一 lds type（0xe05d1000→0xe05f1000）。前提成立（权重 524MB ≫ L2，激活仅 327KB）。**但补丁要打 `TensileLibrary_gfx938.co` 而非 FusedMatmul。** M=32 已 68%，headroom 有限；真正偏低的是 M=128（49%）。
+4. M=128 全 shape 掉到 30-49%（tile 换到 ×128），是下一档可优化点，但生产 M=32 不受影响。
