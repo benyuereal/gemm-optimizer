@@ -1,0 +1,6 @@
+{
+  "name": "gemm-optimizer",
+  "version": "1.0.0",
+  "description": "Hygon DCU (gfx938) hipBLASLt FP8 GEMM kernel 优化助手：反汇编 .co、打 slc/Layout A/vmcnt patch、权重重排、bit-exact 校验、同机 A/B benchmark 与报告",
+  "author": { "name": "benyuereal" }
+}
