@@ -1,4 +1,4 @@
-# 07 · 优化原理：为什么 slc 有效（硬件 + 指令）
+# 07 · slc（evict-first）为什么有效：让激活常驻 L2、让权重过路不留痕
 
 > 一句话结论：decode GEMM 是带宽 bound，HBM 流量 = 一次性流过的权重 + 反复复用的激活 + 写回输出。
 > 默认缓存策略下，大权重流把 L2 填满、把小激活逐出 → 激活每次复用都 miss 回 HBM，凭空多出一轮
@@ -52,6 +52,10 @@ GPU 执行层级有三档，**中间那档在不同软件栈里叫法不同**（
 | HBM | 峰值 **1.8 TB/s** | 带宽墙，memory-bound 的天花板（01 篇） |
 | L2 | **8 MB**（全 CU 共享） | 硬件自动缓存，受 cache hint（slc/glc）影响 |
 | L1 / LDS | LDS **64 KB/CU**（显式管理）；L1 是 `buffer_load` 走的硬件缓存 | LDS 只够 1 WG/CU，split-K 无空间（01/02 篇） |
+
+![DCU 计算子系统：内存层级 HBM → L2 → L1/LDS → 寄存器 → Vector ALU（左），以及 GEMM 里权重(蓝)不过 LDS、激活(绿)经 LDS 的两条数据通路（右）](../assets/dcu_compute_subsystem.png)
+
+> 上图把这张表画出来：**左半**是 DCU 计算子系统的内存层级（HBM → L2 → 每 GCU 的 L1/LDS → Vector/Scalar 寄存器 → Vector ALU）；**右半**是 GEMM 的两条数据通路——**权重 B（蓝）走 `buffer_load` 直接进寄存器、不过 LDS**，**激活 A（绿）先进 VGPR 再 `ds_write` 写 LDS、`ds_read` 回 VGPR 供 MMAC 吃**。右半与 §1.5 的 `data_path_structure.svg` 是同一件事的两种画法。
 
 64 个 CU。decode 算术强度 ≈ 2·M FLOP/byte，roofline 交点 M_ridge ≈ 155（560TFLOPS÷1.8TB/s），
 **M < 155 全部 memory-bound**（M=32 带宽墙天花板仅 ~115 TFLOPS）：优化方向是**搬得更快**，
@@ -291,6 +295,12 @@ gfx900 系 `buffer_load` 指令 **word0** 的缓存策略位（本例只动 bit1
 |------|------|------|----------|--------|
 | **lds 型** | prologue | 直接写 LDS（`buffer_load_dwordx4 ... offen lds`） | `E05D1000 → E05F1000` | fp8 FusedMatmul |
 | **idxen 型** | K-loop | 向量索引加载（`... idxen`） | `E05C3000 → E05E3000` | bf16 Tensile Cijk K-loop |
+
+![gfx900 buffer_load word0 的两个 cache hint 位：SLC(bit17) / GLC(bit16)，lds 型 `E05D1000→E05F1000`、idxen 型 `E05C3000→E05E3000`，通用改法 `word0 |= 0x20000`](../assets/buffer_load_cache_hints.png)
+
+> 上图是上表的图形版：**同一批 `buffer_load` 指令的 word0 里，bit17=SLC、bit16=GLC**；两种指令形态
+> （lds 型 / idxen 型）翻的都是 bit17，只是**编码随指令变**（`E05D1000→E05F1000` vs `E05C3000→E05E3000`）。
+> 通用改法一行 `word0 |= 0x20000`，只翻 bit17、不碰其他位。
 
 **"哪组 load 是流式读权重的大头"必须反汇编数清**——bf16 gate_up M=32 winner kernel
 （`Custom_Cijk_..._MT128x32x128_SE_K1_thread384`）里：
