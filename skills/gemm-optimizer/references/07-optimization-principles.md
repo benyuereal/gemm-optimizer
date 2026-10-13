@@ -1,4 +1,4 @@
-# 07 · 优化原理：为什么 slc 有效 + GEMM 带宽优化的通用思路
+# 07 · 优化原理：为什么 slc 有效（硬件 + 指令）
 
 > 一句话结论：decode GEMM 是带宽 bound，HBM 流量 = 一次性流过的权重 + 反复复用的激活 + 写回输出。
 > 默认缓存策略下，大权重流把 L2 填满、把小激活逐出 → 激活每次复用都 miss 回 HBM，凭空多出一轮
@@ -6,10 +6,118 @@
 > 逐出"，把位置留给复用数据，bit-for-bit 无损。实测 bf16 gate_up 524MB M=32：-6.2%
 > （422.4→396.3µs，1241→1323 GB/s，以 01/02 篇为准）。
 >
-> 本文讲这条因果链的三层（硬件 → 指令 → 运行条件）+ 新任务通用排查顺序；
+> 本文讲这条因果链的两层（硬件 → 指令）；
 > 数字全部以 01/02/03 篇已记录内容为准，不自造数字。
 
 ## 1. 硬件层：缓存层级与"污染"问题
+
+### 1.0 优化背景：M=32/64 带宽利用率不足（slc 的动机）
+
+**我们的背景**：decode 场景 GEMM 是带宽 bound，但 **M=32 / M=64 的实测带宽利用率只有
+~60%**，距离 **~80% 的理想值还有明显差距**——说明 HBM 流量里有可以省掉的冗余字节，
+存在优化空间。这正是 slc（evict-first）针对的问题：大权重流冲刷 L2、把小激活逐出，
+造成激活复用时多余的 HBM 流量（详见 1.3）。
+
+**学界背景**：GEMM 的带宽低效是已知问题——attention / MoE 里的投影 GEMM 因**算术强度低**
+（QKV 投影的算术强度比 down 投影低）而**带宽受限**，是 kernel 融合、GEMM 优化的主要对象。
+下面这篇参考论文（arXiv:2510.27656）专门总结了 attention 与 MoE GEMM 的带宽低效：
+
+> 内联 SVG（Markdown 渲染器支持即显示）。红色高亮 = QKV 投影因算术强度低而带宽受限的段落，
+> 直接点出"投影 GEMM 的带宽低效"这一背景。
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 720" font-family="Georgia,'Times New Roman',serif">
+  <rect width="1000" height="720" fill="#ffffff"/>
+  <text x="40" y="30" font-size="11" fill="#666" font-family="-apple-system,'PingFang SC',sans-serif">arXiv:2510.27656v2 [cs.CL]</text>
+  <text x="960" y="30" text-anchor="end" font-size="11" fill="#666" font-family="-apple-system,'PingFang SC',sans-serif">3 Oct 2025</text>
+  <line x1="40" y1="40" x2="960" y2="40" stroke="#ddd" stroke-width="1"/>
+  <text x="40" y="66" font-size="12" fill="#1a1a1a">
+    <tspan x="40" dy="0">with a single fused kernel. For example, the prefill Q and KV</tspan>
+    <tspan x="40" dy="16">projections (Section 3.1), the post-attention linear layer (Sec-</tspan>
+    <tspan x="40" dy="16">tion 3.1), and the QKV projection in MLA (Section 2.3) can be</tspan>
+    <tspan x="40" dy="16">fused. These fused kernels are shown in Figure 11. We measure</tspan>
+    <tspan x="40" dy="16">the kernel fusion&#8217;s effect on GPU utilization. For the MLA QKV</tspan>
+    <tspan x="40" dy="16">projection, fusion leads to a 1.25&#215; reduction in GPU time. For</tspan>
+    <tspan x="40" dy="16">the prefill QKV projection in GPT-OSS, fusion leads to a 1.3&#215;</tspan>
+    <tspan x="40" dy="16">speedup. For the post-attention linear layer, fusion leads to a</tspan>
+    <tspan x="40" dy="16">1.54&#215; speedup. Fusion can also enable a single kernel launch,</tspan>
+    <tspan x="40" dy="16">reducing launch overhead (Chen et al., 2024; Shao et al., 2024;</tspan>
+    <tspan x="40" dy="16">Yang et al., 2024b).</tspan>
+  </text>
+  <rect x="34" y="240" width="422" height="176" fill="#fdecea" stroke="#d33" stroke-width="1.6"/>
+  <text x="48" y="262" font-size="13" font-weight="700" fill="#111">5.4.2 Attention Kernel Fusions</text>
+  <text x="48" y="284" font-size="12" fill="#1a1a1a">
+    <tspan x="48" dy="0">We further find that the performance of the QKV projection</tspan>
+    <tspan x="48" dy="16">is significantly lower than the down projection in the GQA-</tspan>
+    <tspan x="48" dy="16">based models. This is due to the lower arithmetic intensity of</tspan>
+    <tspan x="48" dy="16">the QKV projection. We use Q4, K2, and V2 in the following</tspan>
+    <tspan x="48" dy="16">text to refer to the Q projection with the GQA ratio of 2, the</tspan>
+    <tspan x="48" dy="16">K projection, and the V projection, respectively.</tspan>
+  </text>
+  <text x="48" y="452" font-size="13" font-weight="700" fill="#111">5.5 Inefficiencies in MoE Operations</text>
+  <rect x="44" y="466" width="3" height="16" fill="#d33"/>
+  <text x="48" y="479" font-size="13" font-weight="700" fill="#111">5.5.1 Routing</text>
+  <text x="48" y="502" font-size="12" fill="#1a1a1a">
+    <tspan x="48" dy="0">We investigate the routing computation in MoE models and</tspan>
+    <tspan x="48" dy="16">find several inefficiencies: the top-k expert selection is</tspan>
+    <tspan x="48" dy="16">performed sequentially (limiting GPU utilization), the softmax</tspan>
+    <tspan x="48" dy="16">is computed redundantly per expert, and routing is not</tspan>
+    <tspan x="48" dy="16">overlapped with the following MoE GEMM. Our fused routing</tspan>
+    <tspan x="48" dy="16">kernel computes the top-k experts in parallel and overlaps</tspan>
+    <tspan x="48" dy="16">routing with the downstream GEMM.</tspan>
+  </text>
+  <rect x="44" y="620" width="3" height="16" fill="#d33"/>
+  <text x="48" y="633" font-size="13" font-weight="700" fill="#111">5.5.2 GEMM</text>
+  <text x="48" y="656" font-size="12" fill="#1a1a1a">
+    <tspan x="48" dy="0">We develop a GEMM with per-token-block scaling. Across all</tspan>
+    <tspan x="48" dy="16">MoE layers, our optimized MoE operations speed up 1.17&#215; to</tspan>
+    <tspan x="48" dy="16">1.89&#215; over the reference implementations.</tspan>
+  </text>
+  <text x="520" y="66" font-size="12" fill="#1a1a1a">
+    <tspan x="520" dy="0">... 512 experts in the second and third MoE layers. Across all</tspan>
+    <tspan x="520" dy="16">models and all MoE layers, our fused routing leads to 1.05&#215;</tspan>
+    <tspan x="520" dy="16">to 1.90&#215; speedup in the routing stage.</tspan>
+  </text>
+  <text x="520" y="150" font-size="13" font-weight="700" fill="#111">5.5 Inefficiencies in MoE Operations</text>
+  <text x="520" y="172" font-size="12" fill="#1a1a1a">
+    <tspan x="520" dy="0">We identify several inefficiencies in MoE operations, including</tspan>
+    <tspan x="520" dy="16">the inefficiency in routing and MoE GEMM, and provide our</tspan>
+    <tspan x="520" dy="16">optimizations.</tspan>
+  </text>
+  <rect x="516" y="220" width="3" height="16" fill="#d33"/>
+  <text x="520" y="233" font-size="13" font-weight="700" fill="#111">5.5.1 Routing</text>
+  <text x="520" y="256" font-size="12" fill="#1a1a1a">
+    <tspan x="520" dy="0">The current routing computation contains several inefficien-</tspan>
+    <tspan x="520" dy="16">cies. First, the computation of the top-k experts is not</tspan>
+    <tspan x="520" dy="16">parallel: the top-k experts are selected sequentially, which</tspan>
+    <tspan x="520" dy="16">limits GPU utilization. Our fused routing kernel computes the</tspan>
+    <tspan x="520" dy="16">top-k experts in a parallel manner. Second, the softmax is</tspan>
+    <tspan x="520" dy="16">computed redundantly: the softmax over the selected experts&#8217;</tspan>
+    <tspan x="520" dy="16">scores can be computed once rather than per expert. Third, the</tspan>
+    <tspan x="520" dy="16">routing computation and the following MoE GEMM are not</tspan>
+    <tspan x="520" dy="16">overlapped; we overlap them to improve utilization.</tspan>
+  </text>
+  <rect x="516" y="420" width="3" height="16" fill="#d33"/>
+  <text x="520" y="433" font-size="13" font-weight="700" fill="#111">5.5.2 GEMM</text>
+  <text x="520" y="456" font-size="12" fill="#1a1a1a">
+    <tspan x="520" dy="0">The MoE GEMM operates on a gathered, permuted activation</tspan>
+    <tspan x="520" dy="16">matrix, and the down / gate-up projections differ in shape and</tspan>
+    <tspan x="520" dy="16">arithmetic intensity. We compare our optimized MoE operations</tspan>
+    <tspan x="520" dy="16">with the reference implementations across all layers, reporting</tspan>
+    <tspan x="520" dy="16">the average kernel time per token where the top-8 experts are</tspan>
+    <tspan x="520" dy="16">selected from the 256 routed experts. Across the layers, our</tspan>
+    <tspan x="520" dy="16">MoE operations speed up 1.17&#215; to 1.89&#215;.</tspan>
+  </text>
+  <text x="520" y="590" font-size="13" font-weight="700" fill="#111">5.6 Optimizations for Speculative Decoding</text>
+  <text x="520" y="612" font-size="12" fill="#1a1a1a">
+    <tspan x="520" dy="0">We can skip the routing computations during verification: only</tspan>
+    <tspan x="520" dy="16">the first token is sampled and the remaining tokens are</tspan>
+    <tspan x="520" dy="16">discarded. In practice the routing computations take ~38% time</tspan>
+    <tspan x="520" dy="16">on the sampled tokens. We can also skip the expert computation</tspan>
+    <tspan x="520" dy="16">for tokens in a sequence known to be discarded, saving ~17% on</tspan>
+    <tspan x="520" dy="16">the first token.</tspan>
+  </text>
+  <text x="40" y="708" font-size="11" fill="#888" font-family="-apple-system,'PingFang SC',sans-serif">摘录：attention / MoE GEMM 的带宽低效（QKV 投影算术强度低、bandwidth-bound）—— 本文 slc 优化的背景参考</text>
+</svg>
 
 ### 1.1 gfx938（CDNA3）缓存链
 
@@ -23,9 +131,8 @@
 **M < 155 全部 memory-bound**（M=32 带宽墙天花板仅 ~115 TFLOPS）：优化方向是**搬得更快**，
 不是算得更快（01 篇判据）。
 
-> 📊 **数据通路总图**（HBM → L2 → LDS → VGPR，两条 operand 路 + slc 作用点，浏览器打开）：
-> [`../assets/hardware_structure.svg`](../assets/hardware_structure.svg)
-> 一张图看懂：权重(绿)过 L2 但不进 LDS、标 evict-first；激活(蓝)经 LDS 中转、L2 常驻。
+> 📊 **数据通路总图**见下方 1.5 节内联 SVG：权重(蓝)过 L2 但不进 LDS、标 evict-first；
+> 激活(绿)经 LDS 中转、L2 常驻。
 
 ### 1.2 小 M decode GEMM 的流量结构（以 bf16 gate_up M=32 为例）
 
@@ -55,41 +162,91 @@ line **逐出** → 激活下次被别的 N-tile 读就 miss 回 HBM。HBM 总�
 与原始 **bit-exact**（bf16 slc verify norm_error=5.57e-5，属 bf16 正常误差，02 篇）。这是 slc
 相对 Layout A（重排权重、须 serving 侧配对）的根本优势：**只改二进制里一个 bit，零正确性风险**。
 
-### 1.5 矩阵 tiling 图：复用从哪来（D = A × W）
+### 1.5 数据通路图：谁过路、谁常驻（D = A × W）
 
-> 📊 可视化版本（HTML/SVG，浏览器打开）：[`../assets/matmul_tiling_slc.html`](../assets/matmul_tiling_slc.html)
-> 权重列 tile 绿 / 激活蓝 / 输出橙，红框高亮"当前迭代列"，右侧对照面板。风格参考 tilelang `MatmulExample.png`。
+> 内联 SVG（Markdown 渲染器支持即显示）。权重(蓝)=过路旅客，激活(绿)=常驻居民，
+> 琥珀虚框=slc 作用点。复用次数推导见 1.2。
 
-把 gate_up 的矩阵乘按 winner kernel 的 tile 切开看，就直观看到"谁一次性、谁被复用"：
-
-```
- 权重 W (K=5120 × N=51200, 524MB) —— 全局只从 HBM 读 1 次，每片用完即弃
- ┌──────────┬──────────┬──────────┬─────────┬──────────┐
- │  W₀     │  W₁      │  W₂      │   ⋯     │  W₁₅₉₉   │   每片 5120×32×2B (tile-N=32)
- │ 320KB  │  320KB   │  320KB   │         │  320KB   │   ← 每片恰好被 1 个 tile 用 (读 1 次)
- └────┬─────┴────┬─────┴────┬─────┴────┬────┴────┬──────┘
-      │          │          │          │         │
-      │   A (M=32 × K=5120, 327KB)     │         │
-      │   ┌─────────────────────────┐  │         │
-      └──>│  同一片 A, 被 1600 个列   ├─>│         │   ← A 喂给每一列 (复用 1600 次)
-          │  tile 反复读             │  │         │      且只有 327KB, 装得进 8MB L2
-      ┌───┴────┐   ┌────┐  ┌─────┐  │  │         │
-      ▼        ▼   ▼    │  ▼     │  │  ▼         ▼
-   ┌──────┐ ┌──────┐┌──────┐    ┌──────┐ ┌──────────┐
-   │ D₀   │ │ D₁   ││ D₂   │ ⋯  │D₁₅₉₈│ │  D₁₅₉₉   │  输出 D (M×N), 写 1 次
-   └──────┘ └──────┘└──────┘    └──────┘ └──────────┘
-     N=0     N=32   N=64         N=51168  N=51200
-
-   每列 tile_j 的计算:  D_j = A × W_j      (M×K)·(K×32)
-```
-
-读法：
-- **横向 1600 列**（N 方向切 32 宽）：M=32 ≤ tile-M=128，所以纵向只有 1 行 tile，整个 GEMM = 1600 个列 tile。
-- **每列只用自己那片 W_j**（5120×32×2B ≈ 32MB），读一次、用完不再碰 → 权重是"过路旅客"。
-- **每一列都要完整的 A**（327KB）→ A 被读 1600 次 → A 是"常驻居民"。
-- 结论（和 1.2 推导一致）：缓存里该保的是 A，该赶的是 W_j。slc 干的就是这件事。
-
-（M 变大到超过 tile-M 时会出现纵向多行 tile，激活复用次数变成 (N/tile-N)×(M/tile-M) 但每个 M-tile 只读自己那片 A——"权重仍 1 次、激活复用"的结构不变，只是激活工作集变大，是否还装得进 L2 要按新数字重判，见 1.3。）
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" font-family="-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <marker id="aw" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2f6fdb"/></marker>
+    <marker id="aa" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2f9e5b"/></marker>
+  </defs>
+  <rect width="1200" height="600" fill="#ffffff"/>
+  <text x="600" y="34" text-anchor="middle" font-size="21" font-weight="700" fill="#1f2937">gfx938 GEMM 数据通路　HBM → L2 → 共享内存(LDS) → 寄存器(VGPR)</text>
+  <text x="600" y="58" text-anchor="middle" font-size="13.5" fill="#5b6472">权重 = 过路旅客（流式，slc evict-first）　·　激活 = 常驻居民（高复用，留 L2）</text>
+  <g fill="#4b5563">
+    <rect x="40"  y="88" width="230" height="34" rx="6"/>
+    <rect x="330" y="88" width="210" height="34" rx="6"/>
+    <rect x="600" y="88" width="200" height="34" rx="6"/>
+    <rect x="860" y="88" width="300" height="34" rx="6"/>
+  </g>
+  <g fill="#ffffff" text-anchor="middle" font-size="15.5" font-weight="700">
+    <text x="155" y="111">HBM</text>
+    <text x="435" y="111">L2  8MB</text>
+    <text x="700" y="111">LDS  64KB/CU</text>
+    <text x="1010" y="111">VGPR  /  mmac</text>
+  </g>
+  <g fill="#f6f7f9" stroke="#c7cdd6" stroke-width="1.4">
+    <rect x="40"  y="130" width="230" height="344" rx="6"/>
+    <rect x="330" y="130" width="210" height="344" rx="6"/>
+    <rect x="600" y="130" width="200" height="344" rx="6"/>
+    <rect x="860" y="130" width="300" height="344" rx="6"/>
+  </g>
+  <text x="55" y="150" font-size="12.5" font-weight="700" fill="#2f6fdb">权重 W（流式）</text>
+  <g>
+    <rect x="55" y="158" width="200" height="24" fill="#2f6fdb"/><text x="155" y="175" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₀</text>
+    <rect x="55" y="185" width="200" height="24" fill="#2f6fdb"/><text x="155" y="202" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₁</text>
+    <rect x="55" y="212" width="200" height="24" fill="#2f6fdb"/><text x="155" y="229" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₂</text>
+    <text x="155" y="256" text-anchor="middle" font-size="16" fill="#9aa2af">⋯</text>
+    <rect x="55" y="264" width="200" height="24" fill="#2f6fdb"/><text x="155" y="281" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">W₁₅₉₉</text>
+  </g>
+  <text x="155" y="308" text-anchor="middle" font-size="11.5" fill="#5b6472">524MB · 1600 片 · 各读 1 次</text>
+  <rect x="55" y="345" width="200" height="70" rx="6" fill="#2f9e5b"/>
+  <text x="155" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">激活 A</text>
+  <text x="155" y="397" text-anchor="middle" fill="#eafaf0" font-size="12">327KB · 复用 1600 次</text>
+  <rect x="345" y="345" width="180" height="70" rx="6" fill="#2f9e5b"/>
+  <text x="435" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A 常驻</text>
+  <text x="435" y="397" text-anchor="middle" fill="#eafaf0" font-size="11.5">RESIDENT · 腾位保住</text>
+  <rect x="345" y="170" width="180" height="92" rx="6" fill="#eaf1fd" stroke="#d97706" stroke-width="2.4" stroke-dasharray="7 4"/>
+  <text x="435" y="200" text-anchor="middle" fill="#2f6fdb" font-size="13.5" font-weight="700">W evict-first</text>
+  <text x="435" y="224" text-anchor="middle" fill="#b45309" font-size="12.5" font-weight="700">最先逐出</text>
+  <text x="435" y="246" text-anchor="middle" fill="#5b6472" font-size="11">进 L2 但先牺牲</text>
+  <text x="435" y="262" text-anchor="middle" fill="#b45309" font-size="11" font-weight="700">slc · bit17</text>
+  <rect x="615" y="345" width="170" height="70" rx="6" fill="#2f9e5b"/>
+  <text x="700" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A tiles</text>
+  <text x="700" y="397" text-anchor="middle" fill="#eafaf0" font-size="11">ds_write → ds_read</text>
+  <rect x="615" y="190" width="170" height="60" rx="6" fill="#ffffff" stroke="#c7cdd6" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="700" y="220" text-anchor="middle" fill="#9aa2af" font-size="13" font-weight="700">权重不经过 ✕</text>
+  <text x="700" y="240" text-anchor="middle" fill="#b6bdc7" font-size="11">W 绕过共享内存</text>
+  <rect x="875" y="150" width="270" height="44" rx="6" fill="#2f6fdb"/>
+  <text x="1010" y="178" text-anchor="middle" fill="#fff" font-size="13.5" font-weight="700">W　buffer_load 直入</text>
+  <rect x="875" y="204" width="270" height="44" rx="6" fill="#2f9e5b"/>
+  <text x="1010" y="232" text-anchor="middle" fill="#fff" font-size="13.5" font-weight="700">A　ds_read 回读</text>
+  <rect x="875" y="288" width="270" height="92" rx="8" fill="#4b5563"/>
+  <text x="1010" y="330" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">mmac 计算</text>
+  <text x="1010" y="356" text-anchor="middle" fill="#e5e7eb" font-size="13.5" font-weight="700">D = A × W</text>
+  <path d="M255,205 L345,205" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
+  <path d="M540,205 Q 700,110 875,172" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
+  <path d="M1010,194 L1010,288" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
+  <text x="700" y="104" text-anchor="middle" font-size="12" fill="#2f6fdb" font-weight="700">权重绕过 LDS → 直入寄存器</text>
+  <path d="M255,380 L345,380" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
+  <path d="M525,380 L615,380" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
+  <path d="M785,375 Q 830,330 875,226" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
+  <path d="M1010,248 L1010,288" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
+  <text x="600" y="410" text-anchor="middle" font-size="12" fill="#2f9e5b" font-weight="700">激活经 LDS 中转</text>
+  <g transform="translate(40,495)">
+    <rect x="0" y="0" width="1120" height="92" rx="8" fill="#f6f7f9" stroke="#c7cdd6" stroke-width="1.4"/>
+    <text x="20" y="28" font-size="13.5" font-weight="700" fill="#1f2937">读法</text>
+    <rect x="20" y="42" width="16" height="16" fill="#2f6fdb"/>
+    <text x="44" y="56" font-size="12.5" fill="#374151">权重 W：HBM → L2 → 寄存器（<tspan font-weight="700">不经 LDS</tspan>）；流式读 1 次 → 打 slc evict-first</text>
+    <rect x="20" y="68" width="16" height="16" fill="#2f9e5b"/>
+    <text x="44" y="82" font-size="12.5" fill="#374151">激活 A：HBM → L2 → LDS → 寄存器；复用 1600 次 → <tspan font-weight="700">留 L2 常驻</tspan></text>
+    <rect x="700" y="42" width="26" height="16" fill="#eaf1fd" stroke="#d97706" stroke-width="2" stroke-dasharray="5 3"/>
+    <text x="736" y="56" font-size="12.5" fill="#b45309" font-weight="700">slc 作用点（bit17）</text>
+    <text x="700" y="82" font-size="12" fill="#5b6472">slc ≠ bypass：加位的权重仍进 L2，只是最先被逐</text>
+  </g>
+</svg>
 
 ### 1.6 流程图：无 slc vs 有 slc（左右对照）
 
@@ -220,166 +377,3 @@ gfx900 系 `buffer_load` 指令 **word0** 的缓存策略位（本例只动 bit1
 **patch 二进制 word0 bit17 ≡ 把源码 Para5 翻成 true 再重编译**，两者生成的指令字节完全一致。
 "改 bit 无损"的另一角度：策略位不含数据依赖，只由常量决定"从哪一级取数"。改 bit16 即改 Para4(GLC)，
 本项目不用。
-
-## 3. 运行层：什么条件下生效 / 什么条件下是死路
-
-### 3.1 生效判据：自检决策流（沿流程图走到"可上"才动手）
-
-```
-  拿到一个 GEMM kernel，判断能不能上 slc：
-
-  ┌─────────────────────────────┐
-  │ ① 权重 ≫ L2(8MB)?            │
-  │   (streaming 大流数据存在)     │
-  └──────────────┬──────────────┘
-             否 │└──────────────────────────►  ✗ 无污染问题，无字节可省 (qkv/o 小 shape)
-                是 ▼
-  ┌─────────────────────────────┐
-  │ ② 有 ≪ L2 的高复用数据?       │
-  │   (激活 327KB ≪ 8MB)         │
-  └──────────────┬──────────────┘
-             否 │└──────────────────────────►  ✗ 没有"该保的"，slc 无对象
-                是 ▼
-  ┌─────────────────────────────┐
-  │ ③ kernel 带宽 bound?         │
-  │   (算力 util 低, 带宽离顶有距)  │
-  └──────────────┬──────────────┘
-             否 │└──────────────────────────►  ✗ 计算 bound 省字节没用 (回 01 篇判据)
-                是 ▼
-  ┌─────────────────────────────┐
-  │ ④ 硬件响应 evict-first?       │
-  │   对照实验: 12 条 vs 201 条 slc │
-  └──────────────┬──────────────┘
-         计时相同 │└─────────────────────►  ✗ 该 DCU/固件/DTK 不响应, 该机判死 (03 篇诊断4)
-          计时有差 ▼
-  ┌─────────────────────────────┐
-  │ ⑤ operand 角色 + 改对组?      │
-  │   权重=流式 idxen CLEAR?       │
-  │   load 组数清没混进激活?        │
-  └──────────────┬──────────────┘
-         角色反/改错组 │└────────────────►  ✗ 负优化 / 收益趋零 (见 3.2/3.3)
-              对 ▼
-      ┌──────────────────┐
-      │   ✓ 可上 slc       │
-      │   上 A/B (05 口径)  │
-      └──────────────────┘
-```
-
-任一步走到 ✗ 即进对应死路（3.3），不要往下试。
-
-### 3.2 operand 角色不同，结论不互通（本项目核心教训）
-
-**角色判定一眼表**（反汇编看权重 load 的 idxen CLEAR/SET + saddr-only 与否）：
-
-```
-  权重 load 特征                        slc 结论
-  ┌──────────────────────────┬───────────────────────────────┐
-  │ idxen CLEAR / saddr-only  │  流式 A-side  →  ★ 上 slc (~-6%) │
-  │ (M=32, M=64)             │                               │
-  ├──────────────────────────┼───────────────────────────────┤
-  │ idxen SET (B-operand)     │  →  ✗ 回退, 勿上 (M=128 -2.5%)  │
-  └──────────────────────────┴───────────────────────────────┘
-```
-
-| M | 权重的 operand 角色 | slc 结果 |
-|---|--------------------|----------|
-| 32（bf16 gate_up） | 流式 load（idxen CLEAR / saddr-only），winner `MT128x32x128` | **-6.2%（524MB，422.4→396.3µs）** |
-| 64（bf16 gate_up） | 流式 load（idxen CLEAR / saddr-only），winner `MT128x128x64`（**另一个 kernel**） | **-6.14%（410.4→385.2µs，1280→1355 GB/s）** |
-| 128 | **B-operand / VGPR 路径（idxen SET）** | **回退 2.5%**（qkv/o M=128 实测，勿动） |
-
-**M=32 与 M=64 走的是两个不同的 winner kernel（`MT128x32x128` vs `MT128x128x64`，VA 也不同），但权重在两者里都是流式 A-side load（idxen CLEAR / saddr-only），slc 各自在**各自的** K-loop idxen 组上打，收益几乎持平（-6.2% vs -6.14%）**。这坐实了"**换 M、只要 operand 角色同为流式 A-side/idxen CLEAR，slc 收益一致（~ -6%）**"；但注意**不是**"同一 patch 直接搬"——编码位置/条数按各自 kernel 反汇编数清（02 篇"operand 专属，不跨 shape 迁移"）。换到 **B-operand/idxen SET**（如 M=128）就换结论 → **换 tile 必须重新反汇编 + 重测**。
-
-### 3.3 已知死路（02 篇清单，勿重走）
-
-| 死路 | 原因 |
-|------|------|
-| slc 用在 M=128（B-operand, idxen SET） | 实测回退 2.5% |
-| vmcnt(0)→vmcnt(4) 单独用（不配 Layout A） | no-op，依赖在途 load 结构改变才有效 |
-| 权重 < L2（qkv/o 小 shape）上 slc | 没有污染问题，无字节可省 |
-| split-K | LDS 64KB/CU → 1 WG/CU，无空间 |
-| M=64 结构强塞 M=128 tile / 手写重写 B-load | 分别慢 29% / 回退 5% |
-
-### 3.4 收益量级参考（全部来自 01/02 篇实测）
-
-| case | 手段 | 收益 |
-|------|------|------|
-| fp8 gate_up（262MB） | slc | **-7.2%** |
-| fp8 m128-down / m128-gate_up / m64-gate_up / m64-down | slc+W2 | -22.3% / -7.5% / -4.55% / -10.7% |
-| **bf16 gate_up（524MB）M=32** | slc（K-loop 20 条 idxen） | **-6.2%**（422.4→396.3µs，1241→1323 GB/s） |
-| **bf16 gate_up（524MB）M=64** | slc（winner `MT128x128x64`，另一 kernel 的 K-loop idxen 组） | **-6.14%**（410.4→385.2µs，1280→1355 GB/s） |
-
-量级预期：几%~10% 区间。拿到两位数（如 -22.3%）通常说明原 kernel 污染更重或叠加了其他手段，
-不是 slc 单兵能稳定复现的水平。
-
-## 4. 通用思路：拿到一个新 GEMM 优化任务的排查流
-
-> 原则：**先量化、后动手；一次只动一类手段；无收益进死路清单**。
-
-```
-  ┌─────────────────────────────────────────────────────────────┐
-  │ ① 量化流量                                                    │
-  │   权重/激活/输出字节 (N×K / M×K ×dtype)、复用次数(≈N/tileN)、    │
-  │   当前µs → 有效带宽 + 算力 util (01 篇公式)                     │
-  └──────────────┬──────────────────────────────────────────────┘
-                 │ 判 bound
-                 ▼
-        带宽 bound?  ──否──►  计算 bound: 别碰缓存, 找算术强度/tile
-                 │是
-                 ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ ② 流量分类                                                    │
-  │   streaming(权重, 一次性, ≫L2)  vs  高复用(激活, ≪L2)          │
-  │   → 决定【给谁】加 evict-first (给复用数据加 slc = 负优化)      │
-  └──────────────┬──────────────────────────────────────────────┘
-                 ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ ③ 反汇编数 load 组                                             │
-  │   streaming load 组: 条数/形态(lds|idxen)/编码/角色(A|B,        │
-  │   idxen CLEAR|SET)；确认复用 load 没混进来 (特征 2.2/2.3)        │
-  │   ★ 数错组 = 改完收益趋零 (bf16: K-loop 20 idxen 才是大头)      │
-  └──────────────┬──────────────────────────────────────────────┘
-                 ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ ④ 上 slc 做 A/B                                              │
-  │   只改 streaming load 的 bit17 (word0 |= 0x20000)            │
-  │   A/B 口径 (05 篇): 完整目录重定向 + 交替顺序 ≥5 轮取中位 +     │
-  │   先跑硬件响应对照实验 (03 篇诊断 4/6/7)                       │
-  └──────────────┬──────────────────────────────────────────────┘
-                 ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ ⑤ 每步独立归因                                                │
-  │   一轮只动一类手段; 有收益保留, 无收益回滚 + 记死路清单 (02 篇)   │
-  │   混改 = 说不清谁的贡献 = 等于没测                              │
-  └─────────────────────────────────────────────────────────────┘
-```
-
-> slc 是**无损、零重排**这一档；它没打满收益时，Layout A / selection / tile 是**另成体系的
-> 手段**（各自有 serving 配对、kernel 选择、occupancy 前置条件），不在本文因果链内展开——
-> 详见 02-tuning。本文聚焦 slc 这条无损主链。
-
-## 5. 与其他手段的关系（一句话版，细节看 02-tuning）
-
-- **slc** = 缓存策略（1 个 bit）：bit-for-bit 无损、零重排、最低风险，条件满足就上。
-- **Layout A** = 权重物理布局重排：收益最大（-4%~-22% 区间），但必须 serving 侧配对重排。
-- **selection** = 换现成 kernel：零改动零风险，**最先试**。
-- **vmcnt** = 放宽在途 load 上限：依赖 Layout A，单独 no-op。
-
-**推荐顺序：selection → slc → Layout A（+vmcnt），风险递增、潜在收益递增。**
-每上一档前先确认低一档的判据为何不再满足，并做独立 A/B 归因。
-
-## 6. 一页因果链（总结）
-
-```
-硬件限制        带宽 bound（M<155）+ 权重≫L2 + 激活≪L2
-   ↓
-污染机制        权重流填充 L2 → 逐出激活 → 激活每次复用 miss 回 HBM（冗余字节与权重同量级）
-   ↓
-指令位          权重 load 的 buffer_load word0 bit17 (SLC/evict-first) = "缓存但优先逐出"
-   ↓
-条件判据        权重>L2 ∧ 激活高复用 ∧ 带宽bound ∧ 硬件响应hint ∧ operand角色对 ∧ 改对组
-   ↓
-收益            省掉"激活冗余字节"：fp8 gate_up -7.2% / bf16 gate_up M=32 -6.2%（bit-exact 无损）
-```
-
-任何一步不满足 → 对应死路（第 3.3 节）。slc 是无损主链的终点；更大收益的 Layout A / selection
-是另成体系的手段，见 02-tuning。

@@ -1,112 +1,99 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 700" font-family="-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" font-family="-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">
   <defs>
-    <marker id="aw" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#e08a2e"/></marker>
-    <marker id="aa" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a90d9"/></marker>
+    <marker id="aw" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2f6fdb"/></marker>
+    <marker id="aa" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2f9e5b"/></marker>
   </defs>
-  <rect width="1240" height="700" fill="#ffffff"/>
+  <rect width="1200" height="600" fill="#ffffff"/>
 
   <!-- Title -->
-  <text x="620" y="34" text-anchor="middle" font-size="22" font-weight="700" fill="#1b1f27">gfx938 GEMM 数据通路　HBM → L2 → 共享内存(LDS) → 寄存器(VGPR)</text>
-  <text x="620" y="58" text-anchor="middle" font-size="14" fill="#5b6472">权重 = 过路旅客（流式，slc evict-first）　·　激活 = 常驻居民（高复用，留 L2）</text>
+  <text x="600" y="34" text-anchor="middle" font-size="21" font-weight="700" fill="#1f2937">gfx938 GEMM 数据通路　HBM → L2 → 共享内存(LDS) → 寄存器(VGPR)</text>
+  <text x="600" y="58" text-anchor="middle" font-size="13.5" fill="#5b6472">权重 = 过路旅客（流式，slc evict-first）　·　激活 = 常驻居民（高复用，留 L2）</text>
 
-  <!-- ===== Tier 1: HBM ===== -->
-  <rect x="30" y="95" width="255" height="445" rx="10" fill="#f7f9fc" stroke="#c9d2de" stroke-width="1.5"/>
-  <rect x="30" y="95" width="255" height="40" rx="10" fill="#374151"/>
-  <text x="157" y="121" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">HBM 全局内存</text>
-  <text x="157" y="153" text-anchor="middle" font-size="12" fill="#5b6472">带宽墙 1.8 TB/s</text>
-  <!-- weight cells -->
-  <text x="52" y="180" font-size="12" font-weight="700" fill="#2f7a41">权重 W（流式）</text>
-  <g>
-    <rect x="52" y="190" width="211" height="26" fill="#3fa555"/><text x="157" y="208" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₀</text>
-    <rect x="52" y="220" width="211" height="26" fill="#3fa555"/><text x="157" y="238" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₁</text>
-    <rect x="52" y="250" width="211" height="26" fill="#3fa555"/><text x="157" y="268" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₂</text>
-    <text x="157" y="296" text-anchor="middle" font-size="18" fill="#8a94a3">⋯</text>
-    <rect x="52" y="306" width="211" height="26" fill="#3fa555"/><text x="157" y="324" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">W₁₅₉₉</text>
+  <!-- ===== Tier headers (uniform neutral) ===== -->
+  <g fill="#4b5563">
+    <rect x="40"  y="88" width="230" height="34" rx="6"/>
+    <rect x="330" y="88" width="210" height="34" rx="6"/>
+    <rect x="600" y="88" width="200" height="34" rx="6"/>
+    <rect x="860" y="88" width="300" height="34" rx="6"/>
   </g>
-  <text x="157" y="356" text-anchor="middle" font-size="11" fill="#2f7a41">524MB · 1600 片 · 各读 1 次</text>
-  <!-- activation -->
-  <rect x="52" y="385" width="211" height="80" rx="6" fill="#4a90d9"/>
-  <text x="157" y="418" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">激活 A</text>
-  <text x="157" y="440" text-anchor="middle" fill="#eaf2fb" font-size="12">327KB · 复用 1600 次</text>
+  <g fill="#ffffff" text-anchor="middle" font-size="15.5" font-weight="700">
+    <text x="155" y="111">HBM</text>
+    <text x="435" y="111">L2  8MB</text>
+    <text x="700" y="111">LDS  64KB/CU</text>
+    <text x="1010" y="111">VGPR  /  mmac</text>
+  </g>
+  <!-- tier body boxes -->
+  <g fill="#f6f7f9" stroke="#c7cdd6" stroke-width="1.4">
+    <rect x="40"  y="130" width="230" height="344" rx="6"/>
+    <rect x="330" y="130" width="210" height="344" rx="6"/>
+    <rect x="600" y="130" width="200" height="344" rx="6"/>
+    <rect x="860" y="130" width="300" height="344" rx="6"/>
+  </g>
 
-  <!-- ===== Tier 2: L2 ===== -->
-  <rect x="375" y="95" width="215" height="445" rx="10" fill="#fff8e6" stroke="#e0c26a" stroke-width="1.5"/>
-  <rect x="375" y="95" width="215" height="40" rx="10" fill="#c9a13b"/>
-  <text x="482" y="121" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">L2 缓存 8MB</text>
-  <text x="482" y="153" text-anchor="middle" font-size="12" fill="#8a6d1a">全 CU 共享 · <tspan font-weight="700">slc 作用点</tspan></text>
-  <!-- A resident -->
-  <rect x="395" y="185" width="175" height="115" rx="6" fill="#4a90d9"/>
-  <text x="482" y="232" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A 常驻</text>
-  <text x="482" y="254" text-anchor="middle" fill="#eaf2fb" font-size="12">RESIDENT</text>
-  <text x="482" y="278" text-anchor="middle" fill="#d6e6f7" font-size="11">腾位时保住</text>
-  <!-- W evict-first (highlighted) -->
-  <rect x="395" y="330" width="175" height="120" rx="6" fill="#e9f5ec" stroke="#e0453a" stroke-width="2.5" stroke-dasharray="6 4"/>
-  <text x="482" y="360" text-anchor="middle" fill="#2f7a41" font-size="13" font-weight="700">W evict-first</text>
-  <text x="482" y="382" text-anchor="middle" fill="#a12b22" font-size="12" font-weight="700">最先逐出</text>
-  <text x="482" y="406" text-anchor="middle" fill="#5b6472" font-size="11">⚠ 进 L2 但先牺牲</text>
-  <text x="482" y="428" text-anchor="middle" fill="#5b6472" font-size="11">(bit17 SLC)</text>
-  <text x="482" y="478" text-anchor="middle" font-size="12" fill="#8a6d1a" font-weight="700">slc 让 W 让位，A 留住</text>
+  <!-- ===== HBM: weight (blue) + activation (green) ===== -->
+  <text x="55" y="150" font-size="12.5" font-weight="700" fill="#2f6fdb">权重 W（流式）</text>
+  <g>
+    <rect x="55" y="158" width="200" height="24" fill="#2f6fdb"/><text x="155" y="175" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₀</text>
+    <rect x="55" y="185" width="200" height="24" fill="#2f6fdb"/><text x="155" y="202" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₁</text>
+    <rect x="55" y="212" width="200" height="24" fill="#2f6fdb"/><text x="155" y="229" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₂</text>
+    <text x="155" y="256" text-anchor="middle" font-size="16" fill="#9aa2af">⋯</text>
+    <rect x="55" y="264" width="200" height="24" fill="#2f6fdb"/><text x="155" y="281" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">W₁₅₉₉</text>
+  </g>
+  <text x="155" y="308" text-anchor="middle" font-size="11.5" fill="#5b6472">524MB · 1600 片 · 各读 1 次</text>
+  <rect x="55" y="345" width="200" height="70" rx="6" fill="#2f9e5b"/>
+  <text x="155" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">激活 A</text>
+  <text x="155" y="397" text-anchor="middle" fill="#eafaf0" font-size="12">327KB · 复用 1600 次</text>
 
-  <!-- ===== Tier 3: LDS / Shared Memory ===== -->
-  <rect x="680" y="95" width="200" height="445" rx="10" fill="#f3f0fb" stroke="#c3b8e0" stroke-width="1.5"/>
-  <rect x="680" y="95" width="200" height="40" rx="10" fill="#7c6bb0"/>
-  <text x="780" y="121" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">共享内存 LDS</text>
-  <text x="780" y="153" text-anchor="middle" font-size="12" fill="#6a5a9a">64KB/CU · scratchpad</text>
-  <rect x="700" y="195" width="160" height="130" rx="6" fill="#4a90d9"/>
-  <text x="780" y="250" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A tiles</text>
-  <text x="780" y="274" text-anchor="middle" fill="#eaf2fb" font-size="11">ds_write 写入</text>
-  <text x="780" y="294" text-anchor="middle" fill="#d6e6f7" font-size="11">ds_read 读回</text>
-  <!-- weight does not enter LDS -->
-  <rect x="700" y="375" width="160" height="66" rx="6" fill="#f0f1f4" stroke="#b9c0cc" stroke-width="1.5" stroke-dasharray="5 4"/>
-  <text x="780" y="405" text-anchor="middle" fill="#8a94a3" font-size="13" font-weight="700">权重不经过 ✕</text>
-  <text x="780" y="427" text-anchor="middle" fill="#aeb6c2" font-size="11">W 绕过共享内存</text>
+  <!-- ===== L2: A resident (green) + W evict-first (blue + amber) ===== -->
+  <rect x="345" y="345" width="180" height="70" rx="6" fill="#2f9e5b"/>
+  <text x="435" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A 常驻</text>
+  <text x="435" y="397" text-anchor="middle" fill="#eafaf0" font-size="11.5">RESIDENT · 腾位保住</text>
+  <rect x="345" y="170" width="180" height="92" rx="6" fill="#eaf1fd" stroke="#d97706" stroke-width="2.4" stroke-dasharray="7 4"/>
+  <text x="435" y="200" text-anchor="middle" fill="#2f6fdb" font-size="13.5" font-weight="700">W evict-first</text>
+  <text x="435" y="224" text-anchor="middle" fill="#b45309" font-size="12.5" font-weight="700">最先逐出</text>
+  <text x="435" y="246" text-anchor="middle" fill="#5b6472" font-size="11">进 L2 但先牺牲</text>
+  <text x="435" y="262" text-anchor="middle" fill="#b45309" font-size="11" font-weight="700">slc · bit17</text>
 
-  <!-- ===== Tier 4: VGPR / Register ===== -->
-  <rect x="970" y="95" width="240" height="445" rx="10" fill="#fdf0f0" stroke="#e0b8b8" stroke-width="1.5"/>
-  <rect x="970" y="95" width="240" height="40" rx="10" fill="#b05a5a"/>
-  <text x="1090" y="121" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">寄存器 VGPR</text>
-  <text x="1090" y="153" text-anchor="middle" font-size="12" fill="#9a4a4a">256 / wave</text>
-  <rect x="990" y="190" width="200" height="56" rx="6" fill="#4a90d9"/>
-  <text x="1090" y="223" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A（ds_read 回读）</text>
-  <rect x="990" y="262" width="200" height="56" rx="6" fill="#3fa555"/>
-  <text x="1090" y="295" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">W（buffer_load 直入）</text>
-  <!-- mmac -->
-  <path d="M990,326 L1090,356 L1190,326 Z" fill="none"/>
-  <rect x="990" y="345" width="200" height="100" rx="8" fill="#ef8b3c"/>
-  <text x="1090" y="388" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">mmac 计算</text>
-  <text x="1090" y="414" text-anchor="middle" fill="#fff3e6" font-size="14" font-weight="700">D = A × W</text>
-  <text x="1090" y="436" text-anchor="middle" fill="#fff3e6" font-size="11">v_mmac_f32_16x16x16</text>
+  <!-- ===== LDS: A tiles (green) + weight does not pass (neutral) ===== -->
+  <rect x="615" y="345" width="170" height="70" rx="6" fill="#2f9e5b"/>
+  <text x="700" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A tiles</text>
+  <text x="700" y="397" text-anchor="middle" fill="#eafaf0" font-size="11">ds_write → ds_read</text>
+  <rect x="615" y="190" width="170" height="60" rx="6" fill="#ffffff" stroke="#c7cdd6" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="700" y="220" text-anchor="middle" fill="#9aa2af" font-size="13" font-weight="700">权重不经过 ✕</text>
+  <text x="700" y="240" text-anchor="middle" fill="#b6bdc7" font-size="11">W 绕过共享内存</text>
 
-  <!-- ===== Arrows: weight (orange) ===== -->
-  <!-- HBM W -> L2 W(evict) -->
-  <path d="M285,270 C 340,300 340,380 375,395" fill="none" stroke="#e08a2e" stroke-width="3.5" marker-end="url(#aw)"/>
-  <text x="322" y="330" text-anchor="middle" font-size="11" fill="#c8631f" font-weight="700" transform="rotate(58 322 330)">buffer_load</text>
-  <!-- L2 W -> VGPR W (bypass arc over LDS) -->
-  <path d="M590,385 Q 785,150 970,290" fill="none" stroke="#e08a2e" stroke-width="3.5" marker-end="url(#aw)"/>
-  <text x="785" y="170" text-anchor="middle" font-size="12" fill="#c8631f" font-weight="700">权重绕过共享内存 → 直入寄存器</text>
+  <!-- ===== VGPR: W (blue) + A (green) + mmac (neutral) ===== -->
+  <rect x="875" y="150" width="270" height="44" rx="6" fill="#2f6fdb"/>
+  <text x="1010" y="178" text-anchor="middle" fill="#fff" font-size="13.5" font-weight="700">W　buffer_load 直入</text>
+  <rect x="875" y="204" width="270" height="44" rx="6" fill="#2f9e5b"/>
+  <text x="1010" y="232" text-anchor="middle" fill="#fff" font-size="13.5" font-weight="700">A　ds_read 回读</text>
+  <rect x="875" y="288" width="270" height="92" rx="8" fill="#4b5563"/>
+  <text x="1010" y="330" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">mmac 计算</text>
+  <text x="1010" y="356" text-anchor="middle" fill="#e5e7eb" font-size="13.5" font-weight="700">D = A × W</text>
 
-  <!-- ===== Arrows: activation (blue) ===== -->
-  <!-- HBM A -> L2 A(resident) -->
-  <path d="M285,425 C 340,420 340,250 375,240" fill="none" stroke="#4a90d9" stroke-width="3.5" marker-end="url(#aa)"/>
-  <!-- L2 A -> LDS A -->
-  <path d="M590,240 L680,258" fill="none" stroke="#4a90d9" stroke-width="3.5" marker-end="url(#aa)"/>
-  <!-- LDS A -> VGPR A -->
-  <path d="M880,258 L970,222" fill="none" stroke="#4a90d9" stroke-width="3.5" marker-end="url(#aa)"/>
-  <text x="785" y="235" text-anchor="middle" font-size="11" fill="#2f6fb0" font-weight="700">激活经共享内存中转</text>
+  <!-- ===== weight path (blue): HBM→L2→(over LDS)→VGPR→mmac ===== -->
+  <path d="M255,205 L345,205" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
+  <path d="M540,205 Q 700,110 875,172" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
+  <path d="M1010,194 L1010,288" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
+  <text x="700" y="104" text-anchor="middle" font-size="12" fill="#2f6fdb" font-weight="700">权重绕过 LDS → 直入寄存器</text>
+
+  <!-- ===== activation path (green): HBM→L2→LDS→VGPR→mmac ===== -->
+  <path d="M255,380 L345,380" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
+  <path d="M525,380 L615,380" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
+  <path d="M785,375 Q 830,330 875,226" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
+  <path d="M1010,248 L1010,288" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
+  <text x="600" y="410" text-anchor="middle" font-size="12" fill="#2f9e5b" font-weight="700">激活经 LDS 中转</text>
 
   <!-- ===== Legend ===== -->
-  <g transform="translate(30,565)">
-    <rect x="0" y="0" width="1210" height="115" rx="10" fill="#f7f9fc" stroke="#c9d2de" stroke-width="1.5"/>
-    <text x="20" y="28" font-size="14" font-weight="700" fill="#1b1f27">读法</text>
-    <rect x="20" y="42" width="18" height="18" fill="#3fa555"/>
-    <text x="46" y="56" font-size="13" fill="#374151">权重 W（B-operand）：HBM → L2 → 寄存器，<tspan font-weight="700">不经共享内存</tspan>；流式读 1 次 → 打 evict-first</text>
-    <rect x="20" y="72" width="18" height="18" fill="#4a90d9"/>
-    <text x="46" y="86" font-size="13" fill="#374151">激活 A（A-operand）：HBM → L2 → 共享内存 → 寄存器；复用 1600 次 → <tspan font-weight="700">留 L2 常驻</tspan></text>
-    <line x1="720" y1="56" x2="800" y2="56" stroke="#e08a2e" stroke-width="3.5"/>
-    <text x="812" y="60" font-size="13" fill="#374151">权重通路</text>
-    <line x1="720" y1="86" x2="800" y2="86" stroke="#4a90d9" stroke-width="3.5"/>
-    <text x="812" y="90" font-size="13" fill="#374151">激活通路</text>
-    <rect x="930" y="44" width="24" height="24" fill="#e9f5ec" stroke="#e0453a" stroke-width="2" stroke-dasharray="4 3"/>
-    <text x="964" y="60" font-size="13" fill="#a12b22" font-weight="700">slc 作用点</text>
+  <g transform="translate(40,495)">
+    <rect x="0" y="0" width="1120" height="92" rx="8" fill="#f6f7f9" stroke="#c7cdd6" stroke-width="1.4"/>
+    <text x="20" y="28" font-size="13.5" font-weight="700" fill="#1f2937">读法</text>
+    <rect x="20" y="42" width="16" height="16" fill="#2f6fdb"/>
+    <text x="44" y="56" font-size="12.5" fill="#374151">权重 W：HBM → L2 → 寄存器（<tspan font-weight="700">不经 LDS</tspan>）；流式读 1 次 → 打 slc evict-first</text>
+    <rect x="20" y="68" width="16" height="16" fill="#2f9e5b"/>
+    <text x="44" y="82" font-size="12.5" fill="#374151">激活 A：HBM → L2 → LDS → 寄存器；复用 1600 次 → <tspan font-weight="700">留 L2 常驻</tspan></text>
+    <rect x="700" y="42" width="26" height="16" fill="#eaf1fd" stroke="#d97706" stroke-width="2" stroke-dasharray="5 3"/>
+    <text x="736" y="56" font-size="12.5" fill="#b45309" font-weight="700">slc 作用点（bit17）</text>
+    <text x="700" y="82" font-size="12" fill="#5b6472">slc ≠ bypass：加位的权重仍进 L2，只是最先被逐</text>
   </g>
 </svg>
