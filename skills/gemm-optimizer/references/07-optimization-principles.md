@@ -102,10 +102,10 @@ N-tile = 1600 个 CTA**，每个 CTA 内部沿 K 分 40 步累加（K=5120 ÷ BK
 - 激活：被 1600 个 CTA **共读同一块**（横向复用 = N/BN = 1600 次物理读取）
 - 权重：被切成 1600 片、**每片只被 1 个 CTA 独占读**（纵向零复用）
 
-即 08 篇"复用 N 次 vs M 次"在这个 tile 下的具体数值：**激活 1600 次 ≫ 权重 1 次**——
-这就是 slc 打在权重上的原因：1600 个 CTA 抢的是**同一块 327KB 激活**（要留在 L2），
-流过的却是 **524MB 权重**（读完即弃）；默认 LRU 下权重流把激活冲掉 → 1600 次共读退化成
-~1600 次回 HBM。slc 让权重"过路让位"，把 L2 留给激活（污染机制量化见 1.3）。
+即 08 篇"复用 N 次 vs M 次"在这个 tile 下的具体数值（激活 1600 次 ≫ 权重 1 次，见 §1.2 表）：
+1600 个 CTA 抢的是**同一块 327KB 激活**（要留在 L2），流过的却是 **524MB 权重**（读完即弃）；
+默认 LRU 下权重流把激活冲掉 → 1600 次共读退化成 ~1600 次回 HBM。slc 让权重"过路让位"，
+把 L2 留给激活（污染机制量化见 1.3）。
 
 > 网格怎么切（grid 图）、每个 CTA 内部 K-loop 怎么算、用 2×3×4 小数据手算 tiling 再拼回
 > 完整 Y——完整推导在 **08 篇 §5 / §5.1**，此处不重复。
@@ -135,18 +135,8 @@ slc 反而慢 2.5%（死路，勿迁移）。
 ### 1.4 数据通路图：谁过路、谁常驻（D = A × W）
 
 同一个 mmac，喂它的两条 operand 路**结构不同**——这决定了"缓存里该留谁、该赶谁"。
-先给结论表，再看图：
-
-| 缓存层级 | **权重 W**（蓝，过路） | **激活 A**（绿，常驻） |
-|:---:|:---|:---|
-| HBM | 524MB · 1600 片 | 327KB · 一整块 |
-| L2 (8MB) | 进，但标 **evict-first**（最先被逐） | **常驻**，腾位时保住 |
-| LDS (64KB/CU) | **不经过 ✕** | 经（ds_write→ds_read） |
-| VGPR → mmac | buffer_load 直入 | ds_read 回读 |
-| 复用 | 每片读 **1 次** | 同一块读 **1600 次** |
-| slc 位 | **打在它身上**（bit17） | 不打（要打就方向反了） |
-
-**图**：权重(蓝)=过路旅客，激活(绿)=常驻居民，琥珀虚框=slc 作用点（复用次数推导见 1.2）。
+一图看分工：**权重 W（蓝）过路**（HBM→L2→VGPR，不经 LDS，每片读 1 次，slc 打在它身上）
+vs **激活 A（绿）常驻**（多停一程 LDS，同一块复用 1600 次，L2 保住）：
 
 ![数据通路图：HBM → L2 → LDS → VGPR，权重(蓝)过路 / 激活(绿)常驻，slc 作用点](../assets/data_path_structure.svg)
 
@@ -156,7 +146,7 @@ slc 反而慢 2.5%（死路，勿迁移）。
 ### 1.5 无 slc vs 有 slc（对照）
 
 > **权重 = 过路旅客，激活 = 常驻居民；slc 是给旅客的"优先让座"标记，保证居民不被挤走。**
-> 注意 slc **不是** cache bypass：权重照常进 L2/L1（短期复用），只是腾位时**先被牺牲**。
+> （slc **不是** cache bypass，仍进 L2/L1——见 §2.1 ⚠。）
 
 ```
                 无 slc (clean)                          slc 加在权重 load 上
@@ -224,18 +214,15 @@ gfx900 系 `buffer_load` 指令 **word0** 的缓存策略位（本例只动 bit1
 
 ### 2.2 两种指令形态都要会认（位同为 bit17，编码随指令变）
 
-同一个 bit17，落在两种**不同编码形态**的 `buffer_load` 上，改法（哪个字节翻哪一位）不同：
+同一个 bit17，落在两种**不同编码形态**的 `buffer_load` 上，编码随指令变（word0 编码以
+下方汇编块为准，此处只列形态/位置/主战场）：
 
-| 形态 | 位置 | 特征 | 编码变化（word0） | 主战场 |
-|------|------|------|----------|--------|
-| **lds 型** | prologue | 直接写 LDS（`buffer_load_dwordx4 ... offen lds`） | `E05D1000 → E05F1000` | fp8 FusedMatmul |
-| **idxen 型** | K-loop | 向量索引加载（`... idxen`） | `E05C3000 → E05E3000` | bf16 Tensile Cijk K-loop |
+| 形态 | 位置 | 特征 | 主战场 |
+|------|------|------|--------|
+| **lds 型** | prologue | 直接写 LDS（`... offen lds`） | fp8 FusedMatmul |
+| **idxen 型** | K-loop | 向量索引加载（`... idxen`） | bf16 Tensile Cijk K-loop |
 
-![gfx900 buffer_load word0 的 cache hint 位 SLC(bit17)，lds 型 `E05D1000→E05F1000`、idxen 型 `E05C3000→E05E3000`，通用改法 `word0 |= 0x20000`](../assets/buffer_load_cache_hints.png)
-
-> 上图是上表的图形版：**同一批 `buffer_load` 指令的 word0 里，bit17=SLC**；两种指令形态
-> （lds 型 / idxen 型）翻的都是 bit17，只是**编码随指令变**（`E05D1000→E05F1000` vs `E05C3000→E05E3000`）。
-> 通用改法一行 `word0 |= 0x20000`，只翻 bit17、不碰其他位。
+![gfx900 buffer_load word0 的 cache hint 位 SLC(bit17)，两种形态翻的都是 bit17，通用改法 `word0 |= 0x20000`](../assets/buffer_load_cache_hints.png)
 
 **汇编源码怎么写**（本机 DTK clang 18 实汇编 + objdump 回验）。slc 是加在 `offen` 后的**关键字**，
 **只打在 K-loop 流式读权重那组（idxen 型）**——prologue 的 lds 型只是"要会认"，不是 patch 目标：
@@ -257,30 +244,15 @@ gfx900 系 `buffer_load` 指令 **word0** 的缓存策略位（本例只动 bit1
 > - word0 低 16 位是 kernel-specific 立即数（本例 `0x1000`；生产 M=32 gate_up idxen 是 `0x3000`），随
 >   kernel 变——grep 锚点认**高字节**，低 16 位按各自 kernel 实测，不能照搬（03 篇"先反汇编数清"）。
 
-**怎么定位到该改的那组**（`objdump` 反汇编目标 kernel 区，数 `buffer_load_dwordx4`）：
-1. 认形态：**word0 高字节** `0x5D` → lds 型（指令尾带 `lds` 后缀）；`0x5C` → idxen 型（带向量偏移、
-   K-loop 流式读）。
-2. 认组：prologue 的 lds 型通常少（bf16 gate_up 8 条）、K-loop 的 idxen 型是流式读大权重主体
-   （bf16 gate_up 20 条）——slc 收益在 idxen 那组，只改 prologue 收益趋零。
-3. 只对**流式读权重**的那组 `word0 |= 0x20000`；**激活 load 一律不动**（方向反）。
+**怎么定位到该改的那组**（`objdump` 反汇编目标 kernel 区，数 `buffer_load_dwordx4`，
+bf16 gate_up M=32 winner `..._MT128x32x128_SE_K1_thread384` 为例）：
 
-**"哪组 load 是流式读权重的大头"必须反汇编数清**——bf16 gate_up M=32 winner kernel
-（`Custom_Cijk_..._MT128x32x128_SE_K1_thread384`）里：
-
-```
-  winner kernel 的 load 组（流式读 524MB 大权重）
-  ┌────────────────────────────────────────────────────────────┐
-  │  prologue:  8 条 lds 型  ──►  一次性、量小 ──► 影响小        │
-  │                                                            │
-  │  K-loop:    20 条 idxen 型 ──►  每轮读一片权重 ──► 主体 ★    │
-  │                          slc 打在这里                       │
-  └────────────────────────────────────────────────────────────┘
-  → 只改 prologue（8 条 lds）= 改错组 = 收益趋零
-```
-
-区分权重 load vs 激活 load（只给**一次性大流数据（权重）**加 evict-first，**复用数据（激活）**
-保持默认）：激活 load 有独立特征（0x8003xxxx / idxen **SET** / 不同 s-operand）。
-给激活加 slc = 亲手把它逐出，**方向反了**。
+1. **认形态**：word0 高字节 `0x5C` = idxen 型（K-loop 流式读大权重，主体）；`0x5D` = lds 型
+   （prologue 直写 LDS，一次性、量小）。
+2. **认组**：slc 只打在 **K-loop 的 idxen 那组**（bf16 gate_up 20 条，每轮读一片 524MB 权重）；
+   prologue 的 lds 组（8 条）改了收益趋零——只改 prologue = 改错组。
+3. **认 operand**：只给**流式权重**加；**激活 load 一律不动**（它要靠 L2 复用，加 slc = 亲手逐出，
+   方向反）。激活有独立特征可分辨：word1 `0x8003xxxx` / idxen **SET** / 不同 s-operand。
 
 ### 2.3 与 C++ intrinsic 的对应（patch bit ≡ 改源码常量重编译）
 
@@ -297,5 +269,5 @@ gfx900 系 `buffer_load` 指令 **word0** 的缓存策略位（本例只动 bit1
               patch word0 |= 0x20000
 ```
 
-**patch 二进制 word0 bit17 ≡ 把源码 Para5 翻成 true 再重编译**，两者生成的指令字节完全一致。
-"改 bit 无损"的另一角度：策略位不含数据依赖，只由常量决定"从哪一级取数"。
+**patch 二进制 word0 bit17 ≡ 把源码 Para5 翻成 true 再重编译**，产物字节一致（无损的另一角度：
+这是纯策略位，不含数据依赖，只由编译期常量决定"从哪一级取数"）。
