@@ -18,107 +18,6 @@
 存在优化空间。这正是 slc（evict-first）针对的问题：大权重流冲刷 L2、把小激活逐出，
 造成激活复用时多余的 HBM 流量（详见 1.3）。
 
-**学界背景**：GEMM 的带宽低效是已知问题——attention / MoE 里的投影 GEMM 因**算术强度低**
-（QKV 投影的算术强度比 down 投影低）而**带宽受限**，是 kernel 融合、GEMM 优化的主要对象。
-下面这篇参考论文（arXiv:2510.27656）专门总结了 attention 与 MoE GEMM 的带宽低效：
-
-> 内联 SVG（Markdown 渲染器支持即显示）。红色高亮 = QKV 投影因算术强度低而带宽受限的段落，
-> 直接点出"投影 GEMM 的带宽低效"这一背景。
-
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 720" font-family="Georgia,'Times New Roman',serif">
-  <rect width="1000" height="720" fill="#ffffff"/>
-  <text x="40" y="30" font-size="11" fill="#666" font-family="-apple-system,'PingFang SC',sans-serif">arXiv:2510.27656v2 [cs.CL]</text>
-  <text x="960" y="30" text-anchor="end" font-size="11" fill="#666" font-family="-apple-system,'PingFang SC',sans-serif">3 Oct 2025</text>
-  <line x1="40" y1="40" x2="960" y2="40" stroke="#ddd" stroke-width="1"/>
-  <text x="40" y="66" font-size="12" fill="#1a1a1a">
-    <tspan x="40" dy="0">with a single fused kernel. For example, the prefill Q and KV</tspan>
-    <tspan x="40" dy="16">projections (Section 3.1), the post-attention linear layer (Sec-</tspan>
-    <tspan x="40" dy="16">tion 3.1), and the QKV projection in MLA (Section 2.3) can be</tspan>
-    <tspan x="40" dy="16">fused. These fused kernels are shown in Figure 11. We measure</tspan>
-    <tspan x="40" dy="16">the kernel fusion&#8217;s effect on GPU utilization. For the MLA QKV</tspan>
-    <tspan x="40" dy="16">projection, fusion leads to a 1.25&#215; reduction in GPU time. For</tspan>
-    <tspan x="40" dy="16">the prefill QKV projection in GPT-OSS, fusion leads to a 1.3&#215;</tspan>
-    <tspan x="40" dy="16">speedup. For the post-attention linear layer, fusion leads to a</tspan>
-    <tspan x="40" dy="16">1.54&#215; speedup. Fusion can also enable a single kernel launch,</tspan>
-    <tspan x="40" dy="16">reducing launch overhead (Chen et al., 2024; Shao et al., 2024;</tspan>
-    <tspan x="40" dy="16">Yang et al., 2024b).</tspan>
-  </text>
-  <rect x="34" y="240" width="422" height="176" fill="#fdecea" stroke="#d33" stroke-width="1.6"/>
-  <text x="48" y="262" font-size="13" font-weight="700" fill="#111">5.4.2 Attention Kernel Fusions</text>
-  <text x="48" y="284" font-size="12" fill="#1a1a1a">
-    <tspan x="48" dy="0">We further find that the performance of the QKV projection</tspan>
-    <tspan x="48" dy="16">is significantly lower than the down projection in the GQA-</tspan>
-    <tspan x="48" dy="16">based models. This is due to the lower arithmetic intensity of</tspan>
-    <tspan x="48" dy="16">the QKV projection. We use Q4, K2, and V2 in the following</tspan>
-    <tspan x="48" dy="16">text to refer to the Q projection with the GQA ratio of 2, the</tspan>
-    <tspan x="48" dy="16">K projection, and the V projection, respectively.</tspan>
-  </text>
-  <text x="48" y="452" font-size="13" font-weight="700" fill="#111">5.5 Inefficiencies in MoE Operations</text>
-  <rect x="44" y="466" width="3" height="16" fill="#d33"/>
-  <text x="48" y="479" font-size="13" font-weight="700" fill="#111">5.5.1 Routing</text>
-  <text x="48" y="502" font-size="12" fill="#1a1a1a">
-    <tspan x="48" dy="0">We investigate the routing computation in MoE models and</tspan>
-    <tspan x="48" dy="16">find several inefficiencies: the top-k expert selection is</tspan>
-    <tspan x="48" dy="16">performed sequentially (limiting GPU utilization), the softmax</tspan>
-    <tspan x="48" dy="16">is computed redundantly per expert, and routing is not</tspan>
-    <tspan x="48" dy="16">overlapped with the following MoE GEMM. Our fused routing</tspan>
-    <tspan x="48" dy="16">kernel computes the top-k experts in parallel and overlaps</tspan>
-    <tspan x="48" dy="16">routing with the downstream GEMM.</tspan>
-  </text>
-  <rect x="44" y="620" width="3" height="16" fill="#d33"/>
-  <text x="48" y="633" font-size="13" font-weight="700" fill="#111">5.5.2 GEMM</text>
-  <text x="48" y="656" font-size="12" fill="#1a1a1a">
-    <tspan x="48" dy="0">We develop a GEMM with per-token-block scaling. Across all</tspan>
-    <tspan x="48" dy="16">MoE layers, our optimized MoE operations speed up 1.17&#215; to</tspan>
-    <tspan x="48" dy="16">1.89&#215; over the reference implementations.</tspan>
-  </text>
-  <text x="520" y="66" font-size="12" fill="#1a1a1a">
-    <tspan x="520" dy="0">... 512 experts in the second and third MoE layers. Across all</tspan>
-    <tspan x="520" dy="16">models and all MoE layers, our fused routing leads to 1.05&#215;</tspan>
-    <tspan x="520" dy="16">to 1.90&#215; speedup in the routing stage.</tspan>
-  </text>
-  <text x="520" y="150" font-size="13" font-weight="700" fill="#111">5.5 Inefficiencies in MoE Operations</text>
-  <text x="520" y="172" font-size="12" fill="#1a1a1a">
-    <tspan x="520" dy="0">We identify several inefficiencies in MoE operations, including</tspan>
-    <tspan x="520" dy="16">the inefficiency in routing and MoE GEMM, and provide our</tspan>
-    <tspan x="520" dy="16">optimizations.</tspan>
-  </text>
-  <rect x="516" y="220" width="3" height="16" fill="#d33"/>
-  <text x="520" y="233" font-size="13" font-weight="700" fill="#111">5.5.1 Routing</text>
-  <text x="520" y="256" font-size="12" fill="#1a1a1a">
-    <tspan x="520" dy="0">The current routing computation contains several inefficien-</tspan>
-    <tspan x="520" dy="16">cies. First, the computation of the top-k experts is not</tspan>
-    <tspan x="520" dy="16">parallel: the top-k experts are selected sequentially, which</tspan>
-    <tspan x="520" dy="16">limits GPU utilization. Our fused routing kernel computes the</tspan>
-    <tspan x="520" dy="16">top-k experts in a parallel manner. Second, the softmax is</tspan>
-    <tspan x="520" dy="16">computed redundantly: the softmax over the selected experts&#8217;</tspan>
-    <tspan x="520" dy="16">scores can be computed once rather than per expert. Third, the</tspan>
-    <tspan x="520" dy="16">routing computation and the following MoE GEMM are not</tspan>
-    <tspan x="520" dy="16">overlapped; we overlap them to improve utilization.</tspan>
-  </text>
-  <rect x="516" y="420" width="3" height="16" fill="#d33"/>
-  <text x="520" y="433" font-size="13" font-weight="700" fill="#111">5.5.2 GEMM</text>
-  <text x="520" y="456" font-size="12" fill="#1a1a1a">
-    <tspan x="520" dy="0">The MoE GEMM operates on a gathered, permuted activation</tspan>
-    <tspan x="520" dy="16">matrix, and the down / gate-up projections differ in shape and</tspan>
-    <tspan x="520" dy="16">arithmetic intensity. We compare our optimized MoE operations</tspan>
-    <tspan x="520" dy="16">with the reference implementations across all layers, reporting</tspan>
-    <tspan x="520" dy="16">the average kernel time per token where the top-8 experts are</tspan>
-    <tspan x="520" dy="16">selected from the 256 routed experts. Across the layers, our</tspan>
-    <tspan x="520" dy="16">MoE operations speed up 1.17&#215; to 1.89&#215;.</tspan>
-  </text>
-  <text x="520" y="590" font-size="13" font-weight="700" fill="#111">5.6 Optimizations for Speculative Decoding</text>
-  <text x="520" y="612" font-size="12" fill="#1a1a1a">
-    <tspan x="520" dy="0">We can skip the routing computations during verification: only</tspan>
-    <tspan x="520" dy="16">the first token is sampled and the remaining tokens are</tspan>
-    <tspan x="520" dy="16">discarded. In practice the routing computations take ~38% time</tspan>
-    <tspan x="520" dy="16">on the sampled tokens. We can also skip the expert computation</tspan>
-    <tspan x="520" dy="16">for tokens in a sequence known to be discarded, saving ~17% on</tspan>
-    <tspan x="520" dy="16">the first token.</tspan>
-  </text>
-  <text x="40" y="708" font-size="11" fill="#888" font-family="-apple-system,'PingFang SC',sans-serif">摘录：attention / MoE GEMM 的带宽低效（QKV 投影算术强度低、bandwidth-bound）—— 本文 slc 优化的背景参考</text>
-</svg>
-
 ### 1.1 gfx938（CDNA3）缓存链
 
 | 层级 | 容量 | 管理方式 |
@@ -130,9 +29,6 @@
 64 个 CU。decode 算术强度 ≈ 2·M FLOP/byte，roofline 交点 M_ridge ≈ 155（560TFLOPS÷1.8TB/s），
 **M < 155 全部 memory-bound**（M=32 带宽墙天花板仅 ~115 TFLOPS）：优化方向是**搬得更快**，
 不是算得更快（01 篇判据）。
-
-> 📊 **数据通路总图**见下方 1.5 节内联 SVG：权重(蓝)过 L2 但不进 LDS、标 evict-first；
-> 激活(绿)经 LDS 中转、L2 常驻。
 
 ### 1.2 小 M decode GEMM 的流量结构（以 bf16 gate_up M=32 为例）
 
@@ -190,89 +86,26 @@ line **逐出** → 激活下次被别的 N-tile 读就 miss 回 HBM。HBM 总�
 
 ### 1.5 数据通路图：谁过路、谁常驻（D = A × W）
 
-> 内联 SVG（Markdown 渲染器支持即显示）。权重(蓝)=过路旅客，激活(绿)=常驻居民，
-> 琥珀虚框=slc 作用点。复用次数推导见 1.2。
+同一个 mmac，喂它的两条 operand 路**结构不同**——这决定了"缓存里该留谁、该赶谁"。
+先给结论表，再看图：
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" font-family="-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">
-  <defs>
-    <marker id="aw" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2f6fdb"/></marker>
-    <marker id="aa" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2f9e5b"/></marker>
-  </defs>
-  <rect width="1200" height="600" fill="#ffffff"/>
-  <text x="600" y="34" text-anchor="middle" font-size="21" font-weight="700" fill="#1f2937">gfx938 GEMM 数据通路　HBM → L2 → 共享内存(LDS) → 寄存器(VGPR)</text>
-  <text x="600" y="58" text-anchor="middle" font-size="13.5" fill="#5b6472">权重 = 过路旅客（流式，slc evict-first）　·　激活 = 常驻居民（高复用，留 L2）</text>
-  <g fill="#4b5563">
-    <rect x="40"  y="88" width="230" height="34" rx="6"/>
-    <rect x="330" y="88" width="210" height="34" rx="6"/>
-    <rect x="600" y="88" width="200" height="34" rx="6"/>
-    <rect x="860" y="88" width="300" height="34" rx="6"/>
-  </g>
-  <g fill="#ffffff" text-anchor="middle" font-size="15.5" font-weight="700">
-    <text x="155" y="111">HBM</text>
-    <text x="435" y="111">L2  8MB</text>
-    <text x="700" y="111">LDS  64KB/CU</text>
-    <text x="1010" y="111">VGPR  /  mmac</text>
-  </g>
-  <g fill="#f6f7f9" stroke="#c7cdd6" stroke-width="1.4">
-    <rect x="40"  y="130" width="230" height="344" rx="6"/>
-    <rect x="330" y="130" width="210" height="344" rx="6"/>
-    <rect x="600" y="130" width="200" height="344" rx="6"/>
-    <rect x="860" y="130" width="300" height="344" rx="6"/>
-  </g>
-  <text x="55" y="150" font-size="12.5" font-weight="700" fill="#2f6fdb">权重 W（流式）</text>
-  <g>
-    <rect x="55" y="158" width="200" height="24" fill="#2f6fdb"/><text x="155" y="175" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₀</text>
-    <rect x="55" y="185" width="200" height="24" fill="#2f6fdb"/><text x="155" y="202" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₁</text>
-    <rect x="55" y="212" width="200" height="24" fill="#2f6fdb"/><text x="155" y="229" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₂</text>
-    <text x="155" y="256" text-anchor="middle" font-size="16" fill="#9aa2af">⋯</text>
-    <rect x="55" y="264" width="200" height="24" fill="#2f6fdb"/><text x="155" y="281" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">W₁₅₉₉</text>
-  </g>
-  <text x="155" y="308" text-anchor="middle" font-size="11.5" fill="#5b6472">524MB · 1600 片 · 各读 1 次</text>
-  <rect x="55" y="345" width="200" height="70" rx="6" fill="#2f9e5b"/>
-  <text x="155" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">激活 A</text>
-  <text x="155" y="397" text-anchor="middle" fill="#eafaf0" font-size="12">327KB · 复用 1600 次</text>
-  <rect x="345" y="345" width="180" height="70" rx="6" fill="#2f9e5b"/>
-  <text x="435" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A 常驻</text>
-  <text x="435" y="397" text-anchor="middle" fill="#eafaf0" font-size="11.5">RESIDENT · 腾位保住</text>
-  <rect x="345" y="170" width="180" height="92" rx="6" fill="#eaf1fd" stroke="#d97706" stroke-width="2.4" stroke-dasharray="7 4"/>
-  <text x="435" y="200" text-anchor="middle" fill="#2f6fdb" font-size="13.5" font-weight="700">W evict-first</text>
-  <text x="435" y="224" text-anchor="middle" fill="#b45309" font-size="12.5" font-weight="700">最先逐出</text>
-  <text x="435" y="246" text-anchor="middle" fill="#5b6472" font-size="11">进 L2 但先牺牲</text>
-  <text x="435" y="262" text-anchor="middle" fill="#b45309" font-size="11" font-weight="700">slc · bit17</text>
-  <rect x="615" y="345" width="170" height="70" rx="6" fill="#2f9e5b"/>
-  <text x="700" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A tiles</text>
-  <text x="700" y="397" text-anchor="middle" fill="#eafaf0" font-size="11">ds_write → ds_read</text>
-  <rect x="615" y="190" width="170" height="60" rx="6" fill="#ffffff" stroke="#c7cdd6" stroke-width="1.4" stroke-dasharray="5 4"/>
-  <text x="700" y="220" text-anchor="middle" fill="#9aa2af" font-size="13" font-weight="700">权重不经过 ✕</text>
-  <text x="700" y="240" text-anchor="middle" fill="#b6bdc7" font-size="11">W 绕过共享内存</text>
-  <rect x="875" y="150" width="270" height="44" rx="6" fill="#2f6fdb"/>
-  <text x="1010" y="178" text-anchor="middle" fill="#fff" font-size="13.5" font-weight="700">W　buffer_load 直入</text>
-  <rect x="875" y="204" width="270" height="44" rx="6" fill="#2f9e5b"/>
-  <text x="1010" y="232" text-anchor="middle" fill="#fff" font-size="13.5" font-weight="700">A　ds_read 回读</text>
-  <rect x="875" y="288" width="270" height="92" rx="8" fill="#4b5563"/>
-  <text x="1010" y="330" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">mmac 计算</text>
-  <text x="1010" y="356" text-anchor="middle" fill="#e5e7eb" font-size="13.5" font-weight="700">D = A × W</text>
-  <path d="M255,205 L345,205" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
-  <path d="M540,205 Q 700,110 875,172" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
-  <path d="M1010,194 L1010,288" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
-  <text x="700" y="104" text-anchor="middle" font-size="12" fill="#2f6fdb" font-weight="700">权重绕过 LDS → 直入寄存器</text>
-  <path d="M255,380 L345,380" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
-  <path d="M525,380 L615,380" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
-  <path d="M785,375 Q 830,330 875,226" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
-  <path d="M1010,248 L1010,288" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
-  <text x="600" y="410" text-anchor="middle" font-size="12" fill="#2f9e5b" font-weight="700">激活经 LDS 中转</text>
-  <g transform="translate(40,495)">
-    <rect x="0" y="0" width="1120" height="92" rx="8" fill="#f6f7f9" stroke="#c7cdd6" stroke-width="1.4"/>
-    <text x="20" y="28" font-size="13.5" font-weight="700" fill="#1f2937">读法</text>
-    <rect x="20" y="42" width="16" height="16" fill="#2f6fdb"/>
-    <text x="44" y="56" font-size="12.5" fill="#374151">权重 W：HBM → L2 → 寄存器（<tspan font-weight="700">不经 LDS</tspan>）；流式读 1 次 → 打 slc evict-first</text>
-    <rect x="20" y="68" width="16" height="16" fill="#2f9e5b"/>
-    <text x="44" y="82" font-size="12.5" fill="#374151">激活 A：HBM → L2 → LDS → 寄存器；复用 1600 次 → <tspan font-weight="700">留 L2 常驻</tspan></text>
-    <rect x="700" y="42" width="26" height="16" fill="#eaf1fd" stroke="#d97706" stroke-width="2" stroke-dasharray="5 3"/>
-    <text x="736" y="56" font-size="12.5" fill="#b45309" font-weight="700">slc 作用点（bit17）</text>
-    <text x="700" y="82" font-size="12" fill="#5b6472">slc ≠ bypass：加位的权重仍进 L2，只是最先被逐</text>
-  </g>
-</svg>
+| 缓存层级 | **权重 W**（蓝，过路） | **激活 A**（绿，常驻） |
+|:---:|:---|:---|
+| HBM | 524MB · 1600 片 | 327KB · 一整块 |
+| L2 (8MB) | 进，但标 **evict-first**（最先被逐） | **常驻**，腾位时保住 |
+| LDS (64KB/CU) | **不经过 ✕** | 经（ds_write→ds_read） |
+| VGPR → mmac | buffer_load 直入 | ds_read 回读 |
+| 复用 | 每片读 **1 次** | 同一块读 **1600 次** |
+| slc 位 | **打在它身上**（bit17） | 不打（要打就方向反了） |
+
+**图**：权重(蓝)=过路旅客，激活(绿)=常驻居民，琥珀虚框=slc 作用点（复用次数推导见 1.2）。
+
+![数据通路图：HBM → L2 → LDS → VGPR，权重(蓝)过路 / 激活(绿)常驻，slc 作用点](../assets/data_path_structure.svg)
+
+**三个要点**：
+1. **权重绕开 LDS**（"直达寄存器"是相对 LDS 而言的）——它 HBM→L2→VGPR 一路走，**中间仍过 L2/L1 硬件缓存**，只是不碰片上共享内存。
+2. **slc 只落在权重这条**：给一次性大流数据打 evict-first；给高复用的激活打 = 亲手把它逐出，方向反了。
+3. **slc ≠ bypass**：加位的权重**仍进 L2**（mmac 马上要读，短期复用要保），只是腾位时它先被牺牲，把位置让给那块反复读的激活（污染机制见 1.3）。
 
 ### 1.6 流程图：无 slc vs 有 slc（左右对照）
 

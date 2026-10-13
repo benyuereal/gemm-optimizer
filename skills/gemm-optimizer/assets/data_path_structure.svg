@@ -4,12 +4,8 @@
     <marker id="aa" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2f9e5b"/></marker>
   </defs>
   <rect width="1200" height="600" fill="#ffffff"/>
-
-  <!-- Title -->
   <text x="600" y="34" text-anchor="middle" font-size="21" font-weight="700" fill="#1f2937">gfx938 GEMM 数据通路　HBM → L2 → 共享内存(LDS) → 寄存器(VGPR)</text>
   <text x="600" y="58" text-anchor="middle" font-size="13.5" fill="#5b6472">权重 = 过路旅客（流式，slc evict-first）　·　激活 = 常驻居民（高复用，留 L2）</text>
-
-  <!-- ===== Tier headers (uniform neutral) ===== -->
   <g fill="#4b5563">
     <rect x="40"  y="88" width="230" height="34" rx="6"/>
     <rect x="330" y="88" width="210" height="34" rx="6"/>
@@ -22,15 +18,12 @@
     <text x="700" y="111">LDS  64KB/CU</text>
     <text x="1010" y="111">VGPR  /  mmac</text>
   </g>
-  <!-- tier body boxes -->
   <g fill="#f6f7f9" stroke="#c7cdd6" stroke-width="1.4">
     <rect x="40"  y="130" width="230" height="344" rx="6"/>
     <rect x="330" y="130" width="210" height="344" rx="6"/>
     <rect x="600" y="130" width="200" height="344" rx="6"/>
     <rect x="860" y="130" width="300" height="344" rx="6"/>
   </g>
-
-  <!-- ===== HBM: weight (blue) + activation (green) ===== -->
   <text x="55" y="150" font-size="12.5" font-weight="700" fill="#2f6fdb">权重 W（流式）</text>
   <g>
     <rect x="55" y="158" width="200" height="24" fill="#2f6fdb"/><text x="155" y="175" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₀</text>
@@ -43,8 +36,6 @@
   <rect x="55" y="345" width="200" height="70" rx="6" fill="#2f9e5b"/>
   <text x="155" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">激活 A</text>
   <text x="155" y="397" text-anchor="middle" fill="#eafaf0" font-size="12">327KB · 复用 1600 次</text>
-
-  <!-- ===== L2: A resident (green) + W evict-first (blue + amber) ===== -->
   <rect x="345" y="345" width="180" height="70" rx="6" fill="#2f9e5b"/>
   <text x="435" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A 常驻</text>
   <text x="435" y="397" text-anchor="middle" fill="#eafaf0" font-size="11.5">RESIDENT · 腾位保住</text>
@@ -53,16 +44,12 @@
   <text x="435" y="224" text-anchor="middle" fill="#b45309" font-size="12.5" font-weight="700">最先逐出</text>
   <text x="435" y="246" text-anchor="middle" fill="#5b6472" font-size="11">进 L2 但先牺牲</text>
   <text x="435" y="262" text-anchor="middle" fill="#b45309" font-size="11" font-weight="700">slc · bit17</text>
-
-  <!-- ===== LDS: A tiles (green) + weight does not pass (neutral) ===== -->
   <rect x="615" y="345" width="170" height="70" rx="6" fill="#2f9e5b"/>
   <text x="700" y="375" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A tiles</text>
   <text x="700" y="397" text-anchor="middle" fill="#eafaf0" font-size="11">ds_write → ds_read</text>
   <rect x="615" y="190" width="170" height="60" rx="6" fill="#ffffff" stroke="#c7cdd6" stroke-width="1.4" stroke-dasharray="5 4"/>
   <text x="700" y="220" text-anchor="middle" fill="#9aa2af" font-size="13" font-weight="700">权重不经过 ✕</text>
   <text x="700" y="240" text-anchor="middle" fill="#b6bdc7" font-size="11">W 绕过共享内存</text>
-
-  <!-- ===== VGPR: W (blue) + A (green) + mmac (neutral) ===== -->
   <rect x="875" y="150" width="270" height="44" rx="6" fill="#2f6fdb"/>
   <text x="1010" y="178" text-anchor="middle" fill="#fff" font-size="13.5" font-weight="700">W　buffer_load 直入</text>
   <rect x="875" y="204" width="270" height="44" rx="6" fill="#2f9e5b"/>
@@ -70,21 +57,15 @@
   <rect x="875" y="288" width="270" height="92" rx="8" fill="#4b5563"/>
   <text x="1010" y="330" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">mmac 计算</text>
   <text x="1010" y="356" text-anchor="middle" fill="#e5e7eb" font-size="13.5" font-weight="700">D = A × W</text>
-
-  <!-- ===== weight path (blue): HBM→L2→(over LDS)→VGPR→mmac ===== -->
   <path d="M255,205 L345,205" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
   <path d="M540,205 Q 700,110 875,172" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
   <path d="M1010,194 L1010,288" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
   <text x="700" y="104" text-anchor="middle" font-size="12" fill="#2f6fdb" font-weight="700">权重绕过 LDS → 直入寄存器</text>
-
-  <!-- ===== activation path (green): HBM→L2→LDS→VGPR→mmac ===== -->
   <path d="M255,380 L345,380" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
   <path d="M525,380 L615,380" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
   <path d="M785,375 Q 830,330 875,226" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
   <path d="M1010,248 L1010,288" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
   <text x="600" y="410" text-anchor="middle" font-size="12" fill="#2f9e5b" font-weight="700">激活经 LDS 中转</text>
-
-  <!-- ===== Legend ===== -->
   <g transform="translate(40,495)">
     <rect x="0" y="0" width="1120" height="92" rx="8" fill="#f6f7f9" stroke="#c7cdd6" stroke-width="1.4"/>
     <text x="20" y="28" font-size="13.5" font-weight="700" fill="#1f2937">读法</text>
