@@ -1,95 +1,92 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" font-family="-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 552" font-family="-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">
   <defs>
-    <marker id="aw" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2f6fdb"/></marker>
-    <marker id="aa" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2f9e5b"/></marker>
+    <marker id="aw" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker>
+    <marker id="aa" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#16a34a"/></marker>
+    <marker id="an" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#334155"/></marker>
   </defs>
-  <rect width="1200" height="620" fill="#ffffff"/>
+  <rect width="1200" height="552" fill="#ffffff"/>
 
-  <!-- Title banner -->
-  <rect x="120" y="18" width="960" height="42" rx="21" fill="#1f2937"/>
-  <text x="600" y="45" text-anchor="middle" font-size="19" font-weight="700" fill="#ffffff">gfx938 GEMM 数据通路　HBM → L2 → 共享内存(LDS) → 寄存器(VGPR)</text>
-  <text x="600" y="78" text-anchor="middle" font-size="13.5" fill="#5b6472">权重 = 过路旅客（流式，slc evict-first）　·　激活 = 常驻居民（高复用，留 L2）</text>
+  <!-- Title bar -->
+  <rect x="0" y="0" width="1200" height="52" fill="#1f2937"/>
+  <text x="600" y="33" text-anchor="middle" font-size="20" font-weight="700" fill="#ffffff">DCU 内存层级与 GEMM 数据通路（权重过路 vs 激活常驻，slc evict-first 作用点）</text>
 
-  <!-- ===== HBM card ===== -->
-  <rect x="40" y="96" width="265" height="372" rx="10" fill="#f4f8fd" stroke="#b9d0ef" stroke-width="1.4"/>
-  <rect x="50" y="108" width="245" height="34" rx="8" fill="#3b7bd6"/>
-  <text x="172" y="131" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">HBM 主存储</text>
-  <text x="55" y="164" font-size="12.5" font-weight="700" fill="#2f6fdb">权重 W（流式）</text>
-  <rect x="55" y="172" width="235" height="26" fill="#2f6fdb"/><text x="172" y="190" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₀</text>
-  <rect x="55" y="202" width="235" height="26" fill="#2f6fdb"/><text x="172" y="220" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₁</text>
-  <rect x="55" y="232" width="235" height="26" fill="#2f6fdb"/><text x="172" y="250" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">W₂</text>
-  <text x="172" y="278" text-anchor="middle" font-size="16" fill="#9aa2af">⋯</text>
-  <rect x="55" y="286" width="235" height="26" fill="#2f6fdb"/><text x="172" y="304" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">W₁₅₉₉</text>
-  <text x="172" y="332" text-anchor="middle" font-size="11.5" fill="#5b6472">524MB · 1600 片 · 各读 1 次</text>
-  <rect x="55" y="352" width="235" height="70" rx="6" fill="#2f9e5b"/>
-  <text x="172" y="382" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">激活 A</text>
-  <text x="172" y="404" text-anchor="middle" fill="#eafaf0" font-size="12">327KB · 复用 1600 次</text>
+  <!-- ===== ① 内存层级 ===== -->
+  <rect x="30" y="70" width="380" height="420" rx="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="220" y="97" text-anchor="middle" font-size="15.5" font-weight="700" fill="#1e293b">① 内存层级</text>
 
-  <!-- ===== L2 card ===== -->
-  <rect x="325" y="96" width="265" height="372" rx="10" fill="#f1faf5" stroke="#b3dcc4" stroke-width="1.4"/>
-  <rect x="335" y="108" width="245" height="34" rx="8" fill="#2f9e5b"/>
-  <text x="457" y="131" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">L2 Cache</text>
-  <rect x="340" y="170" width="235" height="104" rx="6" fill="#eef4fd" stroke="#d97706" stroke-width="2.2" stroke-dasharray="7 4"/>
-  <text x="457" y="198" text-anchor="middle" fill="#2f6fdb" font-size="13.5" font-weight="700">W evict-first</text>
-  <text x="457" y="222" text-anchor="middle" fill="#b45309" font-size="12.5" font-weight="700">最先逐出</text>
-  <text x="457" y="244" text-anchor="middle" fill="#5b6472" font-size="11">进 L2 但先牺牲</text>
-  <text x="457" y="262" text-anchor="middle" fill="#b45309" font-size="11" font-weight="700">slc · bit17</text>
-  <rect x="340" y="352" width="235" height="70" rx="6" fill="#2f9e5b"/>
-  <text x="457" y="382" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A 常驻</text>
-  <text x="457" y="404" text-anchor="middle" fill="#eafaf0" font-size="11.5">RESIDENT · 腾位保住</text>
+  <rect x="70" y="112" width="300" height="42" rx="6" fill="#1e293b"/>
+  <text x="220" y="138" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">HBM　1.8 TB/s（权重 524MB · 激活 327KB）</text>
+  <path d="M220,154 L220,172" fill="none" stroke="#334155" stroke-width="2.4" marker-end="url(#an)"/>
 
-  <!-- ===== LDS card ===== -->
-  <rect x="610" y="96" width="265" height="372" rx="10" fill="#fdf6ea" stroke="#ecd3a6" stroke-width="1.4"/>
-  <rect x="620" y="108" width="245" height="34" rx="8" fill="#d97e06"/>
-  <text x="742" y="131" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">L1 / LDS</text>
-  <rect x="625" y="182" width="235" height="70" rx="6" fill="#ffffff" stroke="#c7cdd6" stroke-width="1.4" stroke-dasharray="5 4"/>
-  <text x="742" y="212" text-anchor="middle" fill="#9aa2af" font-size="13" font-weight="700">权重不经过 ✕</text>
-  <text x="742" y="234" text-anchor="middle" fill="#b6bdc7" font-size="11">W 绕过共享内存</text>
-  <rect x="625" y="352" width="235" height="70" rx="6" fill="#2f9e5b"/>
-  <text x="742" y="382" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">A tiles</text>
-  <text x="742" y="404" text-anchor="middle" fill="#eafaf0" font-size="11">ds_write → ds_read</text>
+  <rect x="70" y="176" width="300" height="42" rx="6" fill="#2563eb"/>
+  <text x="220" y="202" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">L2　8MB（全 64 CU 共享）</text>
+  <path d="M220,218 L220,236" fill="none" stroke="#334155" stroke-width="2.4" marker-end="url(#an)"/>
 
-  <!-- ===== VGPR card ===== -->
-  <rect x="895" y="96" width="265" height="372" rx="10" fill="#f4f5f7" stroke="#cdd3dc" stroke-width="1.4"/>
-  <rect x="905" y="108" width="245" height="34" rx="8" fill="#4b5563"/>
-  <text x="1027" y="131" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">寄存器 / mmac</text>
-  <rect x="915" y="168" width="110" height="44" rx="6" fill="#2f6fdb"/>
-  <text x="970" y="188" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="700">W</text>
-  <text x="970" y="205" text-anchor="middle" fill="#dcebfc" font-size="10.5">buffer_load 直入</text>
-  <rect x="1040" y="210" width="110" height="44" rx="6" fill="#2f9e5b"/>
-  <text x="1095" y="230" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="700">A</text>
-  <text x="1095" y="247" text-anchor="middle" fill="#eafaf0" font-size="10.5">ds_read 回读</text>
-  <rect x="915" y="298" width="235" height="84" rx="8" fill="#4b5563"/>
-  <text x="1032" y="336" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">mmac 计算</text>
-  <text x="1032" y="360" text-anchor="middle" fill="#e5e7eb" font-size="13.5" font-weight="700">D = A × W</text>
+  <rect x="70" y="240" width="300" height="42" rx="6" fill="#16a34a"/>
+  <text x="220" y="266" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">L1 / LDS　64KB / CU</text>
+  <path d="M220,282 L220,300" fill="none" stroke="#334155" stroke-width="2.4" marker-end="url(#an)"/>
 
-  <!-- ===== Arrows ===== -->
-  <!-- weight: HBM -> L2 -->
-  <path d="M305,205 L325,205" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
-  <!-- weight: L2 -> VGPR W-box (arc over LDS) -->
-  <path d="M590,205 Q 742,105 966,166" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
-  <text x="742" y="98" text-anchor="middle" font-size="12" fill="#2f6fdb" font-weight="700">权重绕过 LDS → 直入寄存器</text>
-  <!-- weight: VGPR W-box -> mmac -->
-  <path d="M970,212 L970,298" fill="none" stroke="#2f6fdb" stroke-width="3.2" marker-end="url(#aw)"/>
+  <rect x="70" y="304" width="300" height="42" rx="6" fill="#334155"/>
+  <text x="220" y="330" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">VGPR 寄存器</text>
+  <path d="M220,346 L220,364" fill="none" stroke="#334155" stroke-width="2.4" marker-end="url(#an)"/>
 
-  <!-- activation: HBM -> L2 -->
-  <path d="M305,385 L325,385" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
-  <!-- activation: L2 -> LDS -->
-  <path d="M590,385 L610,385" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
-  <!-- activation: LDS -> VGPR A-box -->
-  <path d="M875,385 Q 940,330 1038,236" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
-  <!-- activation: VGPR A-box -> mmac -->
-  <path d="M1095,254 L1095,298" fill="none" stroke="#2f9e5b" stroke-width="3.2" marker-end="url(#aa)"/>
-  <text x="742" y="440" text-anchor="middle" font-size="12" fill="#2f9e5b" font-weight="700">激活经 LDS 中转</text>
+  <rect x="70" y="368" width="300" height="42" rx="6" fill="#1e293b"/>
+  <text x="220" y="394" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">Vector ALU（MMAC）</text>
+
+  <text x="220" y="446" text-anchor="middle" font-size="12.5" fill="#475569">权重只沿 HBM→L2→VGPR 过路；</text>
+  <text x="220" y="466" text-anchor="middle" font-size="12.5" fill="#475569">激活多停一程 LDS</text>
+
+  <!-- ===== ② GEMM 两条数据通路 ===== -->
+  <rect x="430" y="70" width="740" height="420" rx="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="800" y="97" text-anchor="middle" font-size="15.5" font-weight="700" fill="#1e293b">② GEMM 两条数据通路：权重（蓝）过路 vs 激活（绿）常驻</text>
+
+  <rect x="600" y="112" width="400" height="42" rx="6" fill="#1e293b"/>
+  <text x="800" y="138" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">HBM（权重 524MB · 激活 327KB）</text>
+  <path d="M700,154 L588,176" fill="none" stroke="#2563eb" stroke-width="2.6" marker-end="url(#aw)"/>
+  <path d="M900,154 L1032,176" fill="none" stroke="#16a34a" stroke-width="2.6" marker-end="url(#aa)"/>
+
+  <!-- 权重 column (left) -->
+  <rect x="450" y="178" width="230" height="46" rx="6" fill="#2563eb"/>
+  <text x="565" y="198" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">权重 W</text>
+  <text x="565" y="216" text-anchor="middle" font-size="11.5" fill="#dbeafe">1600 片 · 各读 1 次（流式）</text>
+  <path d="M565,224 L565,242" fill="none" stroke="#2563eb" stroke-width="2.6" marker-end="url(#aw)"/>
+
+  <rect x="450" y="244" width="230" height="46" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+  <text x="565" y="264" text-anchor="middle" font-size="13" font-weight="700" fill="#2563eb">L2（evict-first 最先逐出）</text>
+  <text x="565" y="282" text-anchor="middle" font-size="11" fill="#b45309">slc · bit17</text>
+  <path d="M565,290 L565,308" fill="none" stroke="#2563eb" stroke-width="2.6" marker-end="url(#aw)"/>
+
+  <rect x="450" y="310" width="230" height="46" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+  <text x="565" y="330" text-anchor="middle" font-size="13" font-weight="700" fill="#2563eb">VGPR（buffer_load 直入）</text>
+  <text x="565" y="348" text-anchor="middle" font-size="11" fill="#64748b">不经过 LDS ✕</text>
+
+  <!-- 激活 column (right) -->
+  <rect x="920" y="178" width="230" height="46" rx="6" fill="#16a34a"/>
+  <text x="1035" y="198" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">激活 A</text>
+  <text x="1035" y="216" text-anchor="middle" font-size="11.5" fill="#dcfce7">复用 1600 次（高价值）</text>
+  <path d="M1035,224 L1035,242" fill="none" stroke="#16a34a" stroke-width="2.6" marker-end="url(#aa)"/>
+
+  <rect x="920" y="244" width="230" height="46" rx="6" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+  <text x="1035" y="264" text-anchor="middle" font-size="13" font-weight="700" fill="#16a34a">L2（常驻 RESIDENT）</text>
+  <text x="1035" y="282" text-anchor="middle" font-size="11" fill="#64748b">腾出位置给它</text>
+  <path d="M1035,290 L1035,308" fill="none" stroke="#16a34a" stroke-width="2.6" marker-end="url(#aa)"/>
+
+  <rect x="920" y="310" width="230" height="46" rx="6" fill="#16a34a"/>
+  <text x="1035" y="330" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">LDS（ds_write → ds_read）</text>
+  <text x="1035" y="348" text-anchor="middle" font-size="11" fill="#dcfce7">经 LDS 中转</text>
+
+  <!-- converge to MMAC -->
+  <path d="M565,356 L565,392 L660,392" fill="none" stroke="#2563eb" stroke-width="2.6"/>
+  <path d="M660,392 L660,412" fill="none" stroke="#2563eb" stroke-width="2.6" marker-end="url(#aw)"/>
+  <path d="M1035,356 L1035,392 L940,392" fill="none" stroke="#16a34a" stroke-width="2.6"/>
+  <path d="M940,392 L940,412" fill="none" stroke="#16a34a" stroke-width="2.6" marker-end="url(#aa)"/>
+
+  <rect x="600" y="414" width="400" height="40" rx="6" fill="#1e293b"/>
+  <text x="800" y="439" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">MMAC 计算　D = A × W</text>
 
   <!-- ===== Legend ===== -->
-  <rect x="40" y="484" width="1120" height="100" rx="10" fill="#f6f7f9" stroke="#c7cdd6" stroke-width="1.4"/>
-  <text x="60" y="512" font-size="13.5" font-weight="700" fill="#1f2937">读法</text>
-  <rect x="60" y="526" width="16" height="16" fill="#2f6fdb"/>
-  <text x="84" y="540" font-size="12.5" fill="#374151">权重 W：HBM → L2 → 寄存器（<tspan font-weight="700">不经 LDS</tspan>）；流式读 1 次 → 打 slc evict-first</text>
-  <rect x="60" y="552" width="16" height="16" fill="#2f9e5b"/>
-  <text x="84" y="566" font-size="12.5" fill="#374151">激活 A：HBM → L2 → LDS → 寄存器；复用 1600 次 → <tspan font-weight="700">留 L2 常驻</tspan></text>
-  <rect x="720" y="526" width="26" height="16" fill="#eef4fd" stroke="#d97706" stroke-width="2" stroke-dasharray="5 3"/>
-  <text x="756" y="540" font-size="12.5" fill="#b45309" font-weight="700">slc 作用点（bit17）</text>
-  <text x="720" y="566" font-size="12" fill="#5b6472">slc ≠ bypass：加位的权重仍进 L2，只是最先被逐</text>
+  <rect x="430" y="508" width="740" height="30" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="446" y="528" font-size="12.5" fill="#334155">
+    <tspan fill="#2563eb" font-weight="700">■ 权重</tspan>：HBM → L2 → VGPR（不经 LDS）· 打 slc evict-first（bit17，进 L2 但最先被逐）　　<tspan fill="#16a34a" font-weight="700">■ 激活</tspan>：HBM → L2 → LDS → VGPR · 留 L2 常驻
+  </text>
 </svg>
