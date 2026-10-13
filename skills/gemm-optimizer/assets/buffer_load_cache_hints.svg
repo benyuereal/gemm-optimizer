@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" font-family="'Noto Sans CJK SC','PingFang SC','Microsoft YaHei',sans-serif">
+  <rect x="0" y="0" width="1200" height="620" fill="#ffffff"/>
+
+  <!-- title bar -->
+  <rect x="0" y="0" width="1200" height="46" fill="#1f2937"/>
+  <text x="600" y="30" text-anchor="middle" font-size="22" font-weight="bold" fill="#ffffff">gfx900 buffer_load word0 cache hint：bit17 = SLC（evict-first），通用改法 word0 |= 0x20000</text>
+
+  <!-- ================= Panel ① : word0 bit diagram ================= -->
+  <rect x="40" y="66" width="560" height="356" fill="#ffffff" fill-opacity="0.001" stroke="#475569" stroke-width="1.5" stroke-dasharray="7,5" rx="10"/>
+  <text x="60" y="98" font-size="17" font-weight="bold" fill="#1f2937">① word0 (32 bit) bit 图 —— 只画相关位，其余位（寻址/宽度/LDS 偏移）原样不动</text>
+
+  <!-- word0 diagram -->
+  <rect x="64" y="118" width="206" height="62" fill="#f1f5f9" stroke="#334155" stroke-width="1.5"/>
+  <text x="167" y="155" text-anchor="middle" font-size="20" font-weight="bold" fill="#334155" font-family="'Courier New',monospace">bit31 … bit18</text>
+  <rect x="272" y="118" width="86" height="62" fill="#fee2e2" stroke="#dc2626" stroke-width="2.5"/>
+  <text x="315" y="144" text-anchor="middle" font-size="17" font-weight="bold" fill="#b91c1c" font-family="'Courier New',monospace">bit17</text>
+  <text x="315" y="166" text-anchor="middle" font-size="16" font-weight="bold" fill="#b91c1c">SLC ★</text>
+  <rect x="360" y="118" width="206" height="62" fill="#f1f5f9" stroke="#334155" stroke-width="1.5"/>
+  <text x="463" y="155" text-anchor="middle" font-size="20" font-weight="bold" fill="#334155" font-family="'Courier New',monospace">bit15 … bit0</text>
+  <!-- caption under SLC -->
+  <text x="315" y="208" text-anchor="middle" font-size="14" fill="#475569">SLC (bit17) ★ 本项目用 · evict-first：进缓存但【优先逐出】</text>
+
+  <!-- down arrow to the general rule -->
+  <line x1="315" y1="228" x2="315" y2="262" stroke="#475569" stroke-width="2"/>
+  <polygon points="315,272 307,258 323,258" fill="#475569"/>
+  <rect x="200" y="276" width="230" height="40" fill="#1f2937" rx="7"/>
+  <text x="315" y="302" text-anchor="middle" font-size="16" font-weight="bold" fill="#ffffff" font-family="'Courier New',monospace">翻这一位 = word0 |= 0x20000</text>
+
+  <!-- effect note box -->
+  <rect x="88" y="344" width="464" height="56" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5" rx="8"/>
+  <text x="104" y="366" font-size="14" fill="#166534">效果：权重行仍进 L2（短期复用要保），但腾位时</text>
+  <text x="104" y="388" font-size="14" fill="#166534">【优先被牺牲】 —— 给复用的激活行让出位置。不是 bypass。</text>
+
+  <!-- ================= Panel ② : two instruction encodings ================= -->
+  <rect x="620" y="66" width="540" height="356" fill="#ffffff" fill-opacity="0.001" stroke="#475569" stroke-width="1.5" stroke-dasharray="7,5" rx="10"/>
+  <text x="640" y="98" font-size="17" font-weight="bold" fill="#1f2937">② 两种指令形态（同一批 buffer_load，改法相同：只翻 bit17）</text>
+
+  <!-- lds row -->
+  <text x="640" y="142" font-size="17" font-weight="bold" fill="#2563eb">lds 型（fp8 FusedMatmul prologue，8 行）</text>
+  <rect x="640" y="156" width="148" height="46" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5" rx="6"/>
+  <text x="714" y="185" text-anchor="middle" font-size="18" font-weight="bold" fill="#1e40af" font-family="'Courier New',monospace">E05D 1000</text>
+  <line x1="796" y1="179" x2="840" y2="179" stroke="#475569" stroke-width="2"/>
+  <polygon points="850,179 838,172 838,186" fill="#475569"/>
+  <rect x="850" y="156" width="148" height="46" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5" rx="6"/>
+  <text x="924" y="185" text-anchor="middle" font-size="18" font-weight="bold" fill="#1e40af" font-family="'Courier New',monospace">E05F 1000</text>
+  <!-- red highlight on changed byte -->
+  <rect x="690" y="156" width="26" height="46" fill="#dc2626" fill-opacity="0.28" rx="3"/>
+  <rect x="900" y="156" width="26" height="46" fill="#dc2626" fill-opacity="0.28" rx="3"/>
+  <text x="1030" y="185" font-size="14" fill="#475569">word0：bit17 0→1</text>
+
+  <!-- idxen row -->
+  <text x="640" y="252" font-size="17" font-weight="bold" fill="#2563eb">idxen 型（bf16 Tensile Cijk K-loop，20 行）</text>
+  <rect x="640" y="266" width="148" height="46" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5" rx="6"/>
+  <text x="714" y="295" text-anchor="middle" font-size="18" font-weight="bold" fill="#1e40af" font-family="'Courier New',monospace">E05C 3000</text>
+  <line x1="796" y1="289" x2="840" y2="289" stroke="#475569" stroke-width="2"/>
+  <polygon points="850,289 838,282 838,296" fill="#475569"/>
+  <rect x="850" y="266" width="148" height="46" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5" rx="6"/>
+  <text x="924" y="295" text-anchor="middle" font-size="18" font-weight="bold" fill="#1e40af" font-family="'Courier New',monospace">E05E 3000</text>
+  <rect x="690" y="266" width="26" height="46" fill="#dc2626" fill-opacity="0.28" rx="3"/>
+  <rect x="900" y="266" width="26" height="46" fill="#dc2626" fill-opacity="0.28" rx="3"/>
+  <text x="1030" y="295" font-size="14" fill="#475569">word0：bit17 0→1</text>
+
+  <!-- intrinsic equivalence -->
+  <rect x="640" y="336" width="500" height="64" fill="#f8fafc" stroke="#334155" stroke-width="1.2" rx="8"/>
+  <text x="656" y="360" font-size="14" fill="#1f2937" font-weight="bold">C++ intrinsic：__builtin_hcu_buffer_load_dwordx4(..., Para5)</text>
+  <text x="656" y="382" font-size="13.5" fill="#475569">Para5 = slc 常量（编译期常量，折进 word0 bit17）；</text>
+  <text x="656" y="400" font-size="13.5" fill="#475569">patch bit17 ≡ 把 Para5 翻成 true 重编译 → 指令字节完全一致（bit-exact）。</text>
+
+  <!-- ================= bottom legend ================= -->
+  <rect x="40" y="446" width="1120" height="52" fill="#ffffff" fill-opacity="0.001" stroke="#94a3b8" stroke-width="1.3" stroke-dasharray="6,4" rx="8"/>
+  <rect x="70" y="466" width="22" height="22" fill="#dc2626" fill-opacity="0.28" stroke="#dc2626" stroke-width="1.5" rx="3"/>
+  <text x="102" y="483" font-size="14" fill="#334155">改变的字节（byte0：bit17 0→1）</text>
+  <rect x="360" y="466" width="22" height="22" fill="#fee2e2" stroke="#dc2626" stroke-width="2" rx="3"/>
+  <text x="392" y="483" font-size="14" fill="#334155">SLC (bit17)：evict-first，进缓存但优先逐出</text>
+  <text x="720" y="483" font-size="14" fill="#334155">通用改法 word0 |= 0x20000 —— 只翻 bit17，其余位（寻址/宽度/偏移）不碰 → 数值与指令流无损</text>
+
+  <!-- footnote -->
+  <text x="40" y="540" font-size="12.5" fill="#94a3b8">注：改法只作用于权重（B-operand）的 buffer_load —— 权重流式读一次，evict-first 给它让路；</text>
+  <text x="40" y="558" font-size="12.5" fill="#94a3b8">激活（A-operand）被 N/BN 个 CTA 反复读，必须常驻 L2，不能加 slc。详见 07-optimization-principles.md §2。</text>
+</svg>
