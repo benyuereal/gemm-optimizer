@@ -19,10 +19,13 @@
 
 实测收益案例:
 - fp8 (FusedMatmul, lds型): m128-down -22.3%, m128-gate_up -7.5%, m64-gate_up -4.55%, m64-down -10.7% (slc+W2), gate_up 262MB slc -7.2%
-- **bf16 (Tensile Cijk, idxen型)**: gate_up (524MB) M=32 slc -6.2% (422.4→396.3µs, 1241→1323 GB/s, 5轮交替A/B, 顺序混杂已排除, verify norm_error=5.57e-5 无损)。winner kernel `Custom_Cijk_..._MT128x32x128_SE_K1_thread384`, 改 K-loop 20 条 E05C3000。
+- **bf16 (Tensile Cijk, idxen型) gate_up (524MB)**:
+  - **M=32 slc -6.2%** (422.4→396.3µs, 1241→1323 GB/s, 5轮交替A/B, 顺序混杂已排除, verify norm_error=5.57e-5 无损)
+  - **M=64 slc -6.14%** (410.4→385.2µs, 1280→1355 GB/s, 6轮交替A/B, patched先跑轮次仍 -6.31% 坐实, verify norm_error=5.57e-5)
+  - 两 M 是**两个不同** winner kernel: M=32 → `MT128x32x128` (VA 0x1abdb400); M=64 → `MT128x128x64` (VA 0x78886750)。但两者权重都是流式 A-side load (idxen CLEAR / saddr-only), 各自在自己 kernel 的 K-loop idxen 组上打 slc (M=32 是 20 条 E05C3000; M=64 按反汇编数清), 收益持平 → **换 M、只要 operand 角色同为流式 A-side, slc 收益一致 (~ -6%); 但编码位置/条数按各自 kernel 反汇编, 不是同一 patch 直接搬**。
 
 策略状态:
-- **bf16 M=32 slc 已确认有效 (-6.2%), 待上生产** (生产主路径其实是 fp8, 见 GLM5.3 记忆; bf16 用于验证方法论)。
+- **bf16 slc 已确认有效 (M=32 -6.2% / M=64 -6.14%), 待上生产** (生产主路径其实是 fp8, 见 GLM5.3 记忆; bf16 用于验证方法论)。一键复现: `scripts/slc_ab.sh`。
 
 ## 关键选择判据
 

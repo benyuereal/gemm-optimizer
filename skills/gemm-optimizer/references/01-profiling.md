@@ -114,5 +114,6 @@ Cijk_Alik_Bljk_F8BS_MT{tileM}x{tileN}x{tileK}_TT*_WG*_MFWGS*_WGM*_bias_channelwi
    - 该 kernel 权重流式加载是 K-loop 里 **20 条 `buffer_load_dwordx4 ... idxen`，编码 E05C3000**（不是 lds 型！prologue 只有 8 条 lds 型 E05D1000，影响小）。
    - slc 位对 idxen 型同样适用：**E05C3000 → E05E3000（+0x20000）**，同 fp8 的 bit17。
    - A/B（卡4，5 轮交替顺序排除先后混杂，L2 flush）：clean 422.4µs → patched 396.3µs，**-26µs / -6.2%**（1241→1323 GB/s，69.0%→73.5%）。patched 先跑的轮次同样快，非顺序假象。
+   - **M=64 同法验证 -6.14%**（卡7 独占，winner `Custom_Cijk_..._MT128x128x64_SE_K1_thread384` VA=0x78886750，与 M=32 是**不同 kernel**；6 轮交替 A/B，patched 先跑轮次 -6.31% 坐实；clean 410.4µs → patched 385.2µs，1280→1355 GB/s；verify norm_error=5.57e-5 无损）。**结论：换 M、operand 同为流式 A-side，slc 收益一致 ~ -6%；但两 M 走不同 kernel，编码位置/条数按各自反汇编数清。**
 4. **重定向 A/B 的坑（踩过的）**：`HIPBLASLT_TENSILE_LIBPATH` 必须指向**完整目录**（全部 .co + .dat），只放 TensileLibrary 会丢 Custom kernel 族 → heuristic 降级选非 Custom 慢 kernel（MT256x128x16，642µs），把"selection 变了"误判成 patch 问题。判据：重定向后先确认 winner kernel 名与默认路径一致。
 5. M=128 全 shape 掉到 30-49%（tile 换到 ×128），是下一档可优化点，但生产 M=32 不受影响。

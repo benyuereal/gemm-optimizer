@@ -54,8 +54,9 @@
 | kernel | 所在库 | VA | 区间终点（下一 FUNC VA） |
 |--------|--------|----|--------------------------|
 | `Custom_Cijk_Alik_Bljk_BBS_BH_Bias_AS_MT128x32x128_SE_K1_thread384_ccyBlockSize384_gfx938` | `library_gfx938/TensileLibrary_gfx938.co` | **0x1abdb400** | 0x1abe3f00 |
+| `Custom_Cijk_Alik_Bljk_BBS_BH_Bias_AS_MT128x128x64_SE_K1_thread384_ccyBlockSize384_gfx938` | `library_gfx938/TensileLibrary_gfx938.co` | **0x78886750** | —（M=64 实测，终点按需 readelf 补） |
 
-（bf16 gate_up M=32 winner kernel，01 篇 slc A/B 的 patch 对象；file_off = 0x1abdb400 - 0x1000。）
+（bf16 gate_up **M=32** 与 **M=64** 的 winner kernel，**两个不同 kernel**（tile 不同：MT128×32×128 vs MT128×128×64），但权重都是流式 A-side load，slc 各自在 K-loop idxen 组上打（M=32 -6.2% / M=64 -6.14%）。file_off = VA - 0x1000。）
 
 ## 编码锚点（本机 DTK clang 18.0.0 实测，换 DTK 必须重验）
 
