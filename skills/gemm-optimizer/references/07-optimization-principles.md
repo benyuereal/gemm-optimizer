@@ -231,7 +231,7 @@ gfx900 系 `buffer_load` 指令 **word0** 的缓存策略位（本例只动 bit1
 | **lds 型** | prologue | 直接写 LDS（`buffer_load_dwordx4 ... offen lds`） | `E05D1000 → E05F1000` | fp8 FusedMatmul |
 | **idxen 型** | K-loop | 向量索引加载（`... idxen`） | `E05C3000 → E05E3000` | bf16 Tensile Cijk K-loop |
 
-![gfx900 buffer_load word0 的 cache hint 位 SLC(bit17)，lds 型 `E05D1000→E05F1000`、idxen 型 `E05C3000→E05E3000`，通用改法 `word0 |= 0x20000`](../assets/buffer_load_cache_hints.png)
+![gfx900 buffer_load word0 的 cache hint 位 SLC(bit17)，lds 型 `E05D1000→E05F1000`、idxen 型 `E05C3000→E05E3000`，通用改法 `word0 |= 0x20000`](../buffer_load_cache_hints.svg)
 
 > 上图是上表的图形版：**同一批 `buffer_load` 指令的 word0 里，bit17=SLC**；两种指令形态
 > （lds 型 / idxen 型）翻的都是 bit17，只是**编码随指令变**（`E05D1000→E05F1000` vs `E05C3000→E05E3000`）。
