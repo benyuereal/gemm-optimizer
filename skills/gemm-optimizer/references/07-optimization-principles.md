@@ -237,6 +237,48 @@ gfx900 系 `buffer_load` 指令 **word0** 的缓存策略位（本例只动 bit1
 > （lds 型 / idxen 型）翻的都是 bit17，只是**编码随指令变**（`E05D1000→E05F1000` vs `E05C3000→E05E3000`）。
 > 通用改法一行 `word0 |= 0x20000`，只翻 bit17、不碰其他位。
 
+**真实反汇编**（`/opt/dtk/aillvm/bin/llvm-objdump -d` 跑一个真 Tensile Cijk `.co` 抽出来的，
+两行一对，是同一 GEMM 内 K-loop 的流式权重 load + prologue 的 LDS load）：
+
+```asm
+; ── idxen 型（K-loop 流式读大权重，bf16 Tensile 主战场）──
+;    特征: word0 高字节 0x5C; 带向量偏移操作数 v26; 无 lds 后缀
+  buffer_load_dwordx4 v[28:31], v26, s[8:11], 0 offen   // E05C1000 80021C1A   clean
+  buffer_load_dwordx4 v[32:35], v27, s[12:15], 0 offen  // E05C1000 8003201B   clean
+  buffer_load_dwordx4 v[28:31], v26, s[8:11], 0 offen   // E05E1000 80021C1A   ★ slc (0x5C→0x5E)
+  buffer_load_dwordx4 v[32:35], v27, s[12:15], 0 offen  // E05E1000 8003201B   ★ slc (0x5C→0x5E)
+
+; ── lds 型（prologue 直接写 LDS）──
+;    特征: word0 高字节 0x5D; 指令尾带 lds 后缀
+  buffer_load_dwordx4 v26, s[8:11], 0 offen lds         // E05D1000 8002001A   clean
+  buffer_load_dwordx4 v27, s[12:15], 0 offen lds        // E05D1000 8003001B   clean
+  buffer_load_dwordx4 v26, s[8:11], 0 offen lds         // E05F1000 8002001A   ★ slc (0x5D→0x5F)
+  buffer_load_dwordx4 v27, s[12:15], 0 offen lds        // E05F1000 8003001B   ★ slc (0x5D→0x5F)
+```
+
+> **怎么读这几行**
+> - 64-bit 指令 objdump 拆成两个 32-bit word 打印：`E05C1000` 是 **word0**（bits 0-31），
+>   `80021C1A` 是 word1。slc 只动 **word0**，word1 原样。
+> - slc = `word0 |= 0x20000`，翻 32-bit word0 的 **bit17**。按上面大端显示（`E0 5C 10 00`），
+>   bit17 落在**第 2 个字节的 bit1** 上，所以 idxen 型 `0x5C(0101 1100)→0x5E(0101 1110)`、
+>   lds 型 `0x5D(0101 1101)→0x5F(0101 1111)`，**其余 bit 一律不动**。
+> - word0 的**低 16 位**是 **kernel-specific 立即数**，随 kernel 变——本例反汇编两种形态都是
+>   `0x1000`，但生产 M=32 gate_up kernel 的完整锚点是 idxen `E05C3000`（低 16 位 `0x3000`）/
+>   lds `E05D1000`（低 16 位 `0x1000`）。所以 grep 锚点认**高字节** `0x5C / 0x5D`（slc 后 `0x5E / 0x5F`），
+>   低 16 位按各自 kernel 实测；文档里记的 `E05C3000→E05E3000` / `E05D1000→E05F1000`（06 篇 §编码表）
+>   就是那台 kernel 的完整字面串。
+> - "idxen 型"是**对编码形态的称呼**（word0 高字节 0x5C + 向量偏移操作数），不是 objdump 打印的
+>   字面 token——本例助记符只印 `offen`。认指令认 **word0 高字节**（0x5C / 0x5D），不靠助记符文本。
+> - 换 kernel / 换 DTK：先 `llvm-objdump -d` 重新数清这条 kernel 的锚点字节与条数，**不能照搬**别的
+>   kernel 的低 16 位字段值（03 篇"先反汇编数清"）。
+
+**怎么定位到该改的那组**（`objdump` 反汇编目标 kernel 区，数 `buffer_load_dwordx4`）：
+1. 认形态：**word0 高字节** `0x5D` → lds 型（指令尾带 `lds` 后缀）；`0x5C` → idxen 型（带向量偏移、
+   K-loop 流式读）。
+2. 认组：prologue 的 lds 型通常少（bf16 gate_up 8 条）、K-loop 的 idxen 型是流式读大权重主体
+   （bf16 gate_up 20 条）——slc 收益在 idxen 那组，只改 prologue 收益趋零。
+3. 只对**流式读权重**的那组 `word0 |= 0x20000`；**激活 load 一律不动**（方向反）。
+
 **"哪组 load 是流式读权重的大头"必须反汇编数清**——bf16 gate_up M=32 winner kernel
 （`Custom_Cijk_..._MT128x32x128_SE_K1_thread384`）里：
 
