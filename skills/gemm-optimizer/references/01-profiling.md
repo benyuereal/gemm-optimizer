@@ -97,6 +97,9 @@ Cijk_Alik_Bljk_F8BS_MT{tileM}x{tileN}x{tileK}_TT*_WG*_MFWGS*_WGM*_bias_channelwi
 **bf16 走 Tensile 的 Cijk kernel（`TensileLibrary_gfx938.co`, ~774MB），不是 FusedMatmul。**
 工具：`tests/bw_util_bench.py`（torch.matmul + 空闲卡检查 + L2 flush），或 `hipblaslt-bench --print_kernel_info`。
 
+**生产口径**：bf16 qwen3-32b 类 MoE，**生产主场景 = M=32（decode 并发）**（M=1/MTP 数据有水分，已弃用，不拿它做决策）。
+带宽口径与上文一致：有效带宽 GB/s = 权重字节 / µs（bf16 = 2B/元素），利用率 = GB/s ÷ 1.8TB/s。
+
 | shape（权重） | M=16 | M=32 | M=64 | M=128 |
 |---|---|---|---|---|
 | gate_up (524MB) | 76.4% | 68.3% | 69.6% | 49.2% |
@@ -106,6 +109,10 @@ Cijk_Alik_Bljk_F8BS_MT{tileM}x{tileN}x{tileK}_TT*_WG*_MFWGS*_WGM*_bias_channelwi
 
 结论：
 1. **生产 M=32 基本达标**（gate_up 68.3 / down 73.6 / qkv 67.2，贴 M≤64 的 70% 线）。o 50% 是小 N ramp-limited，正常。
-2. **曾在共享卡看到 "M=64 断崖"（39%/12%）是争抢污染，不是 kernel 选错 tile**——干净卡 M=64 与 M=32 持平。**计时必须独占空闲卡**，否则数字作废。
-3. **slc 对 bf16 比特级可打**：Cijk kernel 权重加载是 `buffer_load_dwordx4 ... offen lds`，编码 `E05D1000`，与 fp8 slc 同一 lds type（0xe05d1000→0xe05f1000）。前提成立（权重 524MB ≫ L2，激活仅 327KB）。**但补丁要打 `TensileLibrary_gfx938.co` 而非 FusedMatmul。** M=32 已 68%，headroom 有限；真正偏低的是 M=128（49%）。
-4. M=128 全 shape 掉到 30-49%（tile 换到 ×128），是下一档可优化点，但生产 M=32 不受影响。
+2. **曾在共享卡看到 "M=64 断崖"（39%/12%）是争抢污染，不是 kernel 选错 tile**——干净卡 M=64 与 M=32 持平。**计时必须独占空闲卡**（hy-smi 确认目标卡 HCU 占用 = 0，脚本已内置检查，不闲拒跑），否则数字作废。
+3. **slc 对 bf16 有效，A/B 实测 -6.2%（M=32）**。gate_up winner kernel = `Custom_Cijk_..._MT128x32x128_SE_K1_thread384_ccyBlockSize384_gfx938`，在 `library_gfx938/TensileLibrary_gfx938.co`，VA=0x1abdb400（file_off=VA-0x1000）。
+   - 该 kernel 权重流式加载是 K-loop 里 **20 条 `buffer_load_dwordx4 ... idxen`，编码 E05C3000**（不是 lds 型！prologue 只有 8 条 lds 型 E05D1000，影响小）。
+   - slc 位对 idxen 型同样适用：**E05C3000 → E05E3000（+0x20000）**，同 fp8 的 bit17。
+   - A/B（卡4，5 轮交替顺序排除先后混杂，L2 flush）：clean 422.4µs → patched 396.3µs，**-26µs / -6.2%**（1241→1323 GB/s，69.0%→73.5%）。patched 先跑的轮次同样快，非顺序假象。
+4. **重定向 A/B 的坑（踩过的）**：`HIPBLASLT_TENSILE_LIBPATH` 必须指向**完整目录**（全部 .co + .dat），只放 TensileLibrary 会丢 Custom kernel 族 → heuristic 降级选非 Custom 慢 kernel（MT256x128x16，642µs），把"selection 变了"误判成 patch 问题。判据：重定向后先确认 winner kernel 名与默认路径一致。
+5. M=128 全 shape 掉到 30-49%（tile 换到 ×128），是下一档可优化点，但生产 M=32 不受影响。

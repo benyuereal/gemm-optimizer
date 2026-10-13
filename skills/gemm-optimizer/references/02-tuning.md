@@ -13,11 +13,16 @@
 
 | 手段 | 改什么 | 动权重? | 生效条件 | 典型收益 |
 |------|--------|--------|---------|---------|
-| slc (evict-first) | weight→LDS 的 buffer_load 置 word0 bit17 (0x20000) | 否 | ①weight > L2(8MB) ②weight 是 A-operand(idxen CLEAR, 即 M=64 型); M=128 是 B-operand 用不了 | bit-for-bit无损, +几%~10% |
+| slc (evict-first) | 权重 buffer_load 置 word0 bit17 (0x20000), 两种编码: lds型 E05D1000→E05F1000 / **idxen型 E05C3000→E05E3000** | 否 | ①weight > L2(8MB) ②改的是**流式读权重**的那组 load (先反汇编数清: prologue lds 型 vs K-loop idxen 型, 大头在 K-loop; 只改 prologue 收益趋零); ③M=128 的 B-operand kernel 用不了 (见死路) | bit-for-bit无损, +几%~10% |
 | Layout A (blocked权重布局) | kernel改3个地址常量 (s44=256, s44=0x6400, s50: 0x100→0x8000) | **是** (重排) | M=64/128 大K | -4%~-22% (需与权重重排配对) |
 | vmcnt放宽 | s_waitcnt vmcnt(0)→vmcnt(4) (低word 0x0f70→0x0f74) | 否 | 配合Layout A | 提升在途load, 降latency暴露 |
 
-实测收益案例:m128-down -22.3%, m128-gate_up -7.5%, m64-gate_up -4.55%, m64-down -10.7% (slc+W2), gate_up 262MB slc -7.2%
+实测收益案例:
+- fp8 (FusedMatmul, lds型): m128-down -22.3%, m128-gate_up -7.5%, m64-gate_up -4.55%, m64-down -10.7% (slc+W2), gate_up 262MB slc -7.2%
+- **bf16 (Tensile Cijk, idxen型)**: gate_up (524MB) M=32 slc -6.2% (422.4→396.3µs, 1241→1323 GB/s, 5轮交替A/B, 顺序混杂已排除, verify norm_error=5.57e-5 无损)。winner kernel `Custom_Cijk_..._MT128x32x128_SE_K1_thread384`, 改 K-loop 20 条 E05C3000。
+
+策略状态:
+- **bf16 M=32 slc 已确认有效 (-6.2%), 待上生产** (生产主路径其实是 fp8, 见 GLM5.3 记忆; bf16 用于验证方法论)。
 
 ## 关键选择判据
 

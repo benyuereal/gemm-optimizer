@@ -38,9 +38,12 @@ open(co, 'wb').write(bytes(b))
 
 ### slc（evict-first）
 
-- weight→LDS 的 `buffer_load_dwordx4` **word0 置 bit17（0x20000）**。设位后如 `0xe05d1000` → `0xe05f1000`（变 lds 型）。
-- 只改 **weight** load：`0x8002xxxx` 且 idxen **CLEAR**（M=64 的 A-operand）。
-- **activation** 是 `0x8003xxxx` 或 idxen **SET** —— 一律不动（M=128 的 weight 是 B-operand/idxen SET，slc 实测回退，也别动）。
+- 权重 `buffer_load_dwordx4` **word0 置 bit17（0x20000）**。**两种 lds type 都要会认**:
+  - **lds 型**（prologue, 直接写 LDS）：`E05D1000 → E05F1000`（fp8 FusedMatmul 主战场）。
+  - **idxen 型**（K-loop 流式, 向量地址）：`E05C3000 → E05E3000`（bf16 Tensile Cijk 主战场）。
+- **先反汇编数清权重 load 分几组、大头在哪**:prologue lds 型通常只 8 条,K-loop idxen 型才是流式读大权重的主体(如 bf16 gate_up 20 条)。**改错组 = 只动了 prologue,收益趋零**。
+- 只改**权重**流式 load;**activation** load 一律不动。
+- M=128 的 weight 是 B-operand/idxen SET,slc 实测回退,别动。
 
 ### vmcnt
 
@@ -66,3 +69,5 @@ open(co, 'wb').write(bytes(b))
 3. **权重是否配对？** Layout A 没跑 `reorder_weights.py` → 算错或带宽打不满（正确性过 ≠ 布局对）。
 4. **该机器硬件是否响应 cache hint？** 对照组实验：12 条 slc vs 201 条 slc 计时完全一样 → 该 DCU/固件/DTK 对 evict-first 不响应 → **slc 路线该机判死**，别再堆变体。
 5. **DTK/驱动版本差**：kernel 二进制与 DTK 版本绑定，.co、汇编器、驱动三者版本必须一致。
+6. **重定向库丢了 kernel 族**：`HIPBLASLT_TENSILE_LIBPATH` 必须指向**完整目录**（全部 .co + .dat，可用 symlink 目录省空间：clean=全软链，patched=只 1 个真文件）。只拷 TensileLibrary 会丢 Custom kernel 族 → heuristic 降级选非 Custom 慢 kernel（实测 gate_up M=32：MT128x32x128 422µs 掉到 MT256x128x16 642µs）。**重定向后第一步：`--print_kernel_info` 核对 winner kernel 名与默认路径一致**，不一致 = A/B 无效。
+7. **A/B 顺序混杂**：clean 恒在先/patched 恒在后 → 冷热混杂，收益被高估。必须**交替顺序**（奇数轮 A 先、偶数轮 B 先）跑 ≥5 轮取中位；B 先跑的轮次也照样快才是真收益（bf16 slc -6.2% 即以此法确认）。

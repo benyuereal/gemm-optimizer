@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gate-up GEMM tiling — 复用从哪来 (D = A × W)</title>
+<style>
+  :root{
+    --w:#3fa555;      /* 权重 B-operand  绿 (tilelang 里 B 用绿) */
+    --a:#4a90d9;      /* 激活 A-operand  蓝 (tilelang 里 A 用蓝) */
+    --d:#ef8b3c;      /* 输出 D          橙 (tilelang 里 C 用橙) */
+    --cur:#e0453a;    /* 当前迭代高亮    红 */
+    --hbm:#7a7f8a;
+    --l2:#c9a13b;
+  }
+  html,body{margin:0;background:#fff;font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:#1b1f27;}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 24px 40px;}
+  h1{font-size:22px;font-weight:650;margin:0 0 4px;}
+  .sub{font-size:13px;color:#5b6472;margin:0 0 20px;}
+  svg{width:100%;height:auto;display:block;}
+  .legend{display:flex;gap:22px;flex-wrap:wrap;margin-top:18px;font-size:12.5px;color:#374151;}
+  .legend span{display:inline-flex;align-items:center;gap:7px;}
+  .sw{width:16px;height:16px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.15);}
+  .note{font-size:12px;color:#8a94a3;margin-top:14px;line-height:1.6;}
+  text{font-family:inherit;}
+  .lbl{font-size:12px;fill:#333;}
+  .lbl-b{font-weight:650;}
+  .cap{font-size:11px;fill:#667;}
+  .big{font-size:13px;fill:#111;font-weight:650;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Gate-up GEMM 的 tiling：复用从哪来 &nbsp;<span style="color:#8a94a3;font-weight:500;">D = A × W</span></h1>
+  <p class="sub">权重 W 按 N 切成 1600 列、每列 320KB（K=5120 × 32 × 2B），全局各读一次；激活 A（327KB）被全部 1600 列共用。
+     红框 = 某一刻正在算的那一列。结论：<b style="color:var(--w)">权重 = 过路旅客</b>（evict-first），<b style="color:var(--a)">激活 = 常驻居民</b>（L2 常驻）。</p>
+
+  <svg viewBox="0 0 1140 640" role="img" aria-label="D = A × W tiling diagram">
+    <defs>
+      <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L7,3 L0,6 z" fill="#5b6472"/>
+      </marker>
+      <marker id="arrg" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L7,3 L0,6 z" fill="#2f7a41"/>
+      </marker>
+      <marker id="arra" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L7,3 L0,6 z" fill="#2f6fb0"/>
+      </marker>
+    </defs>
+
+    <!-- ================= WEIGHT band (top) ================= -->
+    <text x="24" y="34" class="big">权重 W　K=5120 × N=51200 · 524MB</text>
+    <text x="24" y="52" class="cap">N 方向切 32 宽 → 1600 列 tile；每列只用自己那片 W_j，读 1 次、用完不再碰</text>
+
+    <!-- weight tiles: 10 visible, middle 4 highlighted "current", rest faded with ellipsis -->
+    <g>
+      <!-- base green tiles row, y=70 h=70 -->
+      <!-- tile 0 -->
+      <rect x="40"  y="70" width="86" height="70" fill="var(--w)" opacity="0.9"/>
+      <text x="83"  y="104" text-anchor="middle" class="lbl lbl-b" fill="#fff">W₀</text>
+      <text x="83"  y="122" text-anchor="middle" class="cap" fill="#eafff0">320KB</text>
+      <!-- tile 1 -->
+      <rect x="136" y="70" width="86" height="70" fill="var(--w)" opacity="0.9"/>
+      <text x="179" y="104" text-anchor="middle" class="lbl lbl-b" fill="#fff">W₁</text>
+      <text x="179" y="122" text-anchor="middle" class="cap" fill="#eafff0">320KB</text>
+      <!-- tile 2 -->
+      <rect x="232" y="70" width="86" height="70" fill="var(--w)" opacity="0.9"/>
+      <text x="275" y="104" text-anchor="middle" class="lbl lbl-b" fill="#fff">W₂</text>
+      <text x="275" y="122" text-anchor="middle" class="cap" fill="#eafff0">320KB</text>
+      <!-- ellipsis -->
+      <text x="352" y="115" text-anchor="middle" class="big" fill="#8a94a3">⋯</text>
+      <!-- CURRENT tile (j = 800, highlighted red) -->
+      <rect x="392" y="66" width="96" height="78" fill="none" stroke="var(--cur)" stroke-width="3" rx="3"/>
+      <rect x="392" y="70" width="96" height="70" fill="var(--w)"/>
+      <text x="440" y="104" text-anchor="middle" class="lbl lbl-b" fill="#fff">W_j</text>
+      <text x="440" y="122" text-anchor="middle" class="cap" fill="#fff">正在算</text>
+      <!-- tile after current -->
+      <text x="540" y="115" text-anchor="middle" class="big" fill="#8a94a3">⋯</text>
+      <!-- last tile -->
+      <rect x="580" y="70" width="96" height="70" fill="var(--w)" opacity="0.9"/>
+      <text x="628" y="104" text-anchor="middle" class="lbl lbl-b" fill="#fff">W₁₅₉₉</text>
+      <text x="628" y="122" text-anchor="middle" class="cap" fill="#eafff0">320KB</text>
+
+      <!-- one-shot stream arrow across the band -->
+      <line x1="40" y1="158" x2="676" y2="158" stroke="var(--w)" stroke-width="2" stroke-dasharray="2 0" marker-end="url(#arrg)"/>
+      <text x="358" y="176" text-anchor="middle" class="cap" fill="#2f7a41">HBM → VGPR（buffer_load）·  纯流式 · 每片读 1 次 ·  <tspan font-weight="700">不占 L2</tspan>（slc evict-first）</text>
+    </g>
+
+    <!-- ================= ACTIVATION (middle) ================= -->
+    <!-- A block, blue, reused 1600x -->
+    <g>
+      <rect x="40" y="210" width="180" height="120" fill="var(--a)" rx="4"/>
+      <text x="130" y="252" text-anchor="middle" class="big" fill="#fff">A（激活）</text>
+      <text x="130" y="274" text-anchor="middle" class="lbl" fill="#eaf2fb">M=32 × K=5120</text>
+      <text x="130" y="294" text-anchor="middle" class="lbl" fill="#eaf2fb">327KB · 复用 1600 次</text>
+      <text x="130" y="314" text-anchor="middle" class="cap" fill="#d6e6f7">HBM → LDS → ds_read → mmac</text>
+
+      <!-- fan-out: A feeds every column; show 5 arrows to tiles, current one bold -->
+      <line x1="220" y1="255" x2="83"  y2="150" stroke="var(--a)" stroke-width="1.4" opacity="0.55" marker-end="url(#arra)"/>
+      <line x1="220" y1="255" x2="179" y2="150" stroke="var(--a)" stroke-width="1.4" opacity="0.55" marker-end="url(#arra)"/>
+      <line x1="220" y1="255" x2="275" y2="150" stroke="var(--a)" stroke-width="1.4" opacity="0.55" marker-end="url(#arra)"/>
+      <!-- to current tile: bold -->
+      <line x1="220" y1="255" x2="440" y2="150" stroke="var(--a)" stroke-width="2.6" marker-end="url(#arra)"/>
+      <line x1="220" y1="255" x2="628" y2="150" stroke="var(--a)" stroke-width="1.4" opacity="0.55" marker-end="url(#arra)"/>
+      <text x="330" y="200" class="cap" fill="#2f6fb0">A 喂给每一列（粗线 = 当前这列 W_j）</text>
+
+      <!-- L2 resident badge -->
+      <rect x="270" y="210" width="230" height="120" fill="#fff8e6" stroke="var(--l2)" stroke-width="1.6" rx="6" stroke-dasharray="5 4"/>
+      <text x="385" y="240" text-anchor="middle" class="big" fill="#7a5c00">L2（8MB）· 常驻区</text>
+      <text x="385" y="264" text-anchor="middle" class="lbl" fill="#7a5c00">激活 327KB 装得下</text>
+      <text x="385" y="286" text-anchor="middle" class="cap" fill="#9a7b1e">N-tile #2…#1600：</text>
+      <text x="385" y="304" text-anchor="middle" class="cap" fill="#9a7b1e">命中 L2，链路短 · 不回 HBM</text>
+    </g>
+
+    <!-- ================= OUTPUT band (bottom) ================= -->
+    <g>
+      <text x="24" y="392" class="big">输出 D = A × W　M × N · 写 1 次</text>
+      <text x="24" y="410" class="cap">每列 tile_j 只算 D_j = A × W_j　（M×K）·（K×32）</text>
+      <!-- D tiles aligned under W tiles -->
+      <rect x="40"  y="424" width="86" height="64" fill="var(--d)" opacity="0.92"/>
+      <text x="83"  y="454" text-anchor="middle" class="lbl lbl-b" fill="#fff">D₀</text>
+      <text x="83"  y="472" text-anchor="middle" class="cap" fill="#fff3e6">N=0</text>
+      <rect x="136" y="424" width="86" height="64" fill="var(--d)" opacity="0.92"/>
+      <text x="179" y="454" text-anchor="middle" class="lbl lbl-b" fill="#fff">D₁</text>
+      <text x="179" y="472" text-anchor="middle" class="cap" fill="#fff3e6">N=32</text>
+      <rect x="232" y="424" width="86" height="64" fill="var(--d)" opacity="0.92"/>
+      <text x="275" y="454" text-anchor="middle" class="lbl lbl-b" fill="#fff">D₂</text>
+      <text x="275" y="472" text-anchor="middle" class="cap" fill="#fff3e6">N=64</text>
+      <text x="352" y="462" text-anchor="middle" class="big" fill="#8a94a3">⋯</text>
+      <!-- current D under current W -->
+      <rect x="392" y="420" width="96" height="72" fill="none" stroke="var(--cur)" stroke-width="3" rx="3"/>
+      <rect x="392" y="424" width="96" height="64" fill="var(--d)"/>
+      <text x="440" y="454" text-anchor="middle" class="lbl lbl-b" fill="#fff">D_j</text>
+      <text x="440" y="472" text-anchor="middle" class="cap" fill="#fff">正在写</text>
+      <text x="540" y="462" text-anchor="middle" class="big" fill="#8a94a3">⋯</text>
+      <rect x="580" y="424" width="96" height="64" fill="var(--d)" opacity="0.92"/>
+      <text x="628" y="454" text-anchor="middle" class="lbl lbl-b" fill="#fff">D₁₅₉₉</text>
+      <text x="628" y="472" text-anchor="middle" class="cap" fill="#fff3e6">N=51200</text>
+
+      <!-- W_j -> D_j, A -> D_j arrows -->
+      <line x1="440" y1="150" x2="440" y2="418" stroke="#8a94a3" stroke-width="1.4" marker-end="url(#arr)"/>
+      <line x1="150" y1="330" x2="420" y2="420" stroke="#8a94a3" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#arr)"/>
+    </g>
+
+    <!-- ================= RIGHT summary panel ================= -->
+    <g transform="translate(730,70)">
+      <rect x="0" y="0" width="384" height="418" fill="#f7f9fc" stroke="#d7dee8" stroke-width="1.4" rx="10"/>
+      <text x="192" y="34" text-anchor="middle" class="big" fill="#1b1f27">数据角色对照</text>
+      <line x1="20" y1="48" x2="364" y2="48" stroke="#d7dee8" stroke-width="1.2"/>
+
+      <!-- weight row -->
+      <rect x="20" y="64" width="18" height="18" fill="var(--w)" rx="3"/>
+      <text x="46" y="78" class="lbl lbl-b">权重 W（B-operand）</text>
+      <text x="46" y="98" class="cap">· 524MB · 全局读 1 次 · 过路旅客</text>
+      <text x="46" y="116" class="cap">· HBM→VGPR→mmac（不走 LDS）</text>
+      <text x="46" y="134" class="cap">· 策略：<tspan font-weight="700" fill="#2f7a41">slc 优先逐出</tspan>，别占 L2</text>
+
+      <line x1="20" y1="150" x2="364" y2="150" stroke="#e5ebf3" stroke-width="1.2"/>
+
+      <!-- activation row -->
+      <rect x="20" y="166" width="18" height="18" fill="var(--a)" rx="3"/>
+      <text x="46" y="180" class="lbl lbl-b">激活 A（A-operand）</text>
+      <text x="46" y="200" class="cap">· 327KB · 被 1600 列复用 · 常驻居民</text>
+      <text x="46" y="218" class="cap">· HBM→VGPR→LDS→ds_read→mmac</text>
+      <text x="46" y="236" class="cap">· 策略：<tspan font-weight="700" fill="#2f6fb0">保持 L2 常驻</tspan>，链路短</text>
+
+      <line x1="20" y1="252" x2="364" y2="252" stroke="#e5ebf3" stroke-width="1.2"/>
+
+      <!-- slc one-liner -->
+      <text x="20" y="282" class="lbl lbl-b" fill="#1b1f27">slc 干的事</text>
+      <text x="20" y="304" class="cap">给「过路旅客」打</text>
+      <text x="20" y="322" class="cap">「优先让座」标记 —— 保证</text>
+      <text x="20" y="340" class="cap">「常驻居民」不被挤走。</text>
+
+      <rect x="20" y="360" width="344" height="38" fill="#fff2f1" stroke="#f0b8b3" rx="6"/>
+      <text x="34" y="384" class="lbl" fill="#a12b22" font-weight="650">注意：slc ≠ cache bypass</text>
+      <text x="34" y="398" class="cap" fill="#a12b22">权重仍进 L1/L2（mmac 马上读），只是腾位时先被牺牲。</text>
+    </g>
+  </svg>
+
+  <div class="legend">
+    <span><i class="sw" style="background:var(--w)"></i>权重 W_j（B-operand，读 1 次 → evict-first）</span>
+    <span><i class="sw" style="background:var(--a)"></i>激活 A（A-operand，复用 1600 次 → L2 常驻）</span>
+    <span><i class="sw" style="background:var(--d)"></i>输出 D_j（写 1 次）</span>
+    <span><i class="sw" style="background:#fff;border:2px solid var(--cur)"></i>当前迭代列</span>
+    <span><i class="sw" style="background:#fff8e6;border:1px dashed var(--l2)"></i>L2 常驻区</span>
+  </div>
+  <p class="note">尺寸与角色对应实测 M=32 bf16 gate_up（winner kernel，K=5120 / N=51200）。
+     M 超过 tile-M 时会出现纵向多行 tile，激活复用变 (N/tile-N)×(M/tile-M)，但「权重 1 次、激活复用」结构不变，
+     激活工作集变大后是否还装得进 L2 需按新数字重判（见 07 篇 1.5 末尾说明）。</p>
+</div>
+</body>
+</html>
