@@ -75,31 +75,33 @@ echo "  ⚠️ 请人工确认卡 $CARD HCU=0% 且显存≈0 (hy-smi)。共享�
 # [1] 按名解析 VA + .text 段基址(自动算 file_off, 不硬编码 VA-0x1000)
 # ---------------------------------------------------------------------------
 echo "=== [1/7] 解析 kernel VA + .text 基址 ==="
-read VA SIZE OFFS < <("$READELF" -s "$CO" 2>/dev/null | "$READELF" -S "$CO" 2>/dev/null | python3 -c "
+# 注意: 必须用 { A; B; } 把符号表(-s)和段表(-S)串成一个流喂给 python。
+# 写成 `A | B | python` 时, -s 的输出进了 -S 的 stdin 被丢弃, python 只拿到段表 → FUNC 数=0 → 解析失败。
+read VA SIZE OFFS < <({ "$READELF" -s "$CO" 2>/dev/null; "$READELF" -S "$CO" 2>/dev/null; } | python3 -c "
 import sys
 lines=[l.rstrip() for l in sys.stdin]
-# 先吃符号表 (readelf -s), 再吃段表 (readelf -S); 两个命令已用管道顺序喂
-# 这里分开解析: 前段是 -s 输出, 空行/ '  ' 开头切换为 -S
+# 前段是 -s 符号表, 段表头 (含 [ ] Name ... Type) 之后切到 -S 段表
 sym_lines=[]; sec_lines=[]
 mode='sym'
 for l in lines:
-    if l.startswith('  [Nr] Name') or l.startswith('  [') and 'Name' in l and 'Type' in l:
+    if l.startswith('  [') and 'Name' in l and 'Type' in l:
         mode='sec'; continue
     (sym_lines if mode=='sym' else sec_lines).append(l)
-# VA of FUNC named KERNEL
+# VA of FUNC named KERNEL (同名多符号 → 按名去重, 否则 size=0)
 target=\"$KERNEL\"
-va=None; order=[]
+byname={}
 for l in sym_lines:
     p=l.split()
     if len(p)>=8 and p[3]=='FUNC':
         try:
             v=int(p[1],16); nm=p[-1].rstrip('\$')
-            order.append((v,nm))
+            byname.setdefault(nm, v)
         except: pass
-order.sort()
-for i,(v,nm) in enumerate(order):
+order=sorted(byname.items())   # [(name, va)]
+va=None
+for i,(nm,v) in enumerate(order):
     if nm==target:
-        end=order[i+1][0] if i+1<len(order) else v+0x200000
+        end=order[i+1][1] if i+1<len(order) else v+0x200000
         va=v; size=end-v; break
 if va is None:
     print('0 0 0'); raise SystemExit
@@ -124,7 +126,8 @@ echo "  VA=$VA  region=$SIZE  file_off=$OFFS"
 # [2] 反汇编 kernel region, 自动数 load 组 (idxen 型 / lds 型), 报告打哪组
 # ---------------------------------------------------------------------------
 echo "=== [2/7] 反汇编 + 数 load 组 ==="
-"$OBJDUMP" -d "$CO" --start-address="$VA" --stop-address=$((0x$VA + 0x$SIZE)) 2>/dev/null > "$WORK/kern.s" || die "反汇编失败"
+# $VA/$SIZE 已带 0x 前缀 (readelf 返回), bash 算术直接吃, 别再拼 0x → 0x0x
+"$OBJDUMP" -d "$CO" --start-address="$VA" --stop-address=$(($VA + $SIZE)) 2>/dev/null > "$WORK/kern.s" || die "反汇编失败"
 python3 - "$WORK/kern.s" <<'PY'
 import re, sys
 txt=open(sys.argv[1]).read()
@@ -206,10 +209,10 @@ echo "=== [5/7] 核对 winner kernel 名 ==="
 winner() { # $1 = 环境变量目录(可空)
   local dir="$1" out
   if [ -z "$dir" ]; then out=$("$B" -m "$N" -n "$M" -k "$K" --lda "$K" --ldb "$K" --ldc "$N" --ldd "$N" \
-      --transA "$TRANSA" --transB "$TRANSB" -r "$DTYPE" -a "$DTYPE" -b "$DTYPE" -c "$DTYPE" -d "$DTYPE" \
+      --transA "$TRANSA" --transB "$TRANSB" -r "$DTYPE" --a_type "$DTYPE" --b_type "$DTYPE" --c_type "$DTYPE" --d_type "$DTYPE" \
       --compute_type "$COMPUTE" --activation_type None --iters 1 --cold_iters 1 --print_kernel_info 2>&1)
   else out=$(HIPBLASLT_TENSILE_LIBPATH="$dir" "$B" -m "$N" -n "$M" -k "$K" --lda "$K" --ldb "$K" --ldc "$N" --ldd "$N" \
-      --transA "$TRANSA" --transB "$TRANSB" -r "$DTYPE" -a "$DTYPE" -b "$DTYPE" -c "$DTYPE" -d "$DTYPE" \
+      --transA "$TRANSA" --transB "$TRANSB" -r "$DTYPE" --a_type "$DTYPE" --b_type "$DTYPE" --c_type "$DTYPE" --d_type "$DTYPE" \
       --compute_type "$COMPUTE" --activation_type None --iters 1 --cold_iters 1 --print_kernel_info 2>&1)
   fi
   echo "$out" | grep -oE "(Custom_Cijk|Cijk|FusedMatmul)[A-Za-z0-9_]*" | head -1
@@ -232,11 +235,11 @@ run_us() { # $1 = 目录(可空)
   local dir="$1"
   if [ -z "$dir" ]; then
     HIP_VISIBLE_DEVICES="$CARD" "$B" -m "$N" -n "$M" -k "$K" --lda "$K" --ldb "$K" --ldc "$N" --ldd "$N" \
-      --transA "$TRANSA" --transB "$TRANSB" -r "$DTYPE" -a "$DTYPE" -b "$DTYPE" -c "$DTYPE" -d "$DTYPE" \
+      --transA "$TRANSA" --transB "$TRANSB" -r "$DTYPE" --a_type "$DTYPE" --b_type "$DTYPE" --c_type "$DTYPE" --d_type "$DTYPE" \
       --compute_type "$COMPUTE" --activation_type None --iters 100 --cold_iters 20 2>&1
   else
     HIPBLASLT_TENSILE_LIBPATH="$dir" HIP_VISIBLE_DEVICES="$CARD" "$B" -m "$N" -n "$M" -k "$K" --lda "$K" --ldb "$K" --ldc "$N" --ldd "$N" \
-      --transA "$TRANSA" --transB "$TRANSB" -r "$DTYPE" -a "$DTYPE" -b "$DTYPE" -c "$DTYPE" -d "$DTYPE" \
+      --transA "$TRANSA" --transB "$TRANSB" -r "$DTYPE" --a_type "$DTYPE" --b_type "$DTYPE" --c_type "$DTYPE" --d_type "$DTYPE" \
       --compute_type "$COMPUTE" --activation_type None --iters 100 --cold_iters 20 2>&1
   fi | awk -F, 'NF>=2 && $NF ~ /^[0-9.]+$/ {print $NF}' | tail -1
 }
@@ -270,14 +273,34 @@ print(f"  Δ = {d:+.2f}%   (patch_group={patch_group})")
 PY
 
 echo "  --- 正确性 (patched --verify) ---"
-HIPBLASLT_TENSILE_LIBPATH="$PATCHD" HIP_VISIBLE_DEVICES="$CARD" "$B" -m "$N" -n "$M" -k "$K" \
+# --verify 打印表头行(含 "norm_error") + 紧跟的数据行(含实际值)。旧法 grep norm|error 只捞到
+# 表头(列名), 捞不到数值。这里按表头列名定位 norm_error/atol/rtol, 再从下一数据行取值。
+VOUT=$(HIPBLASLT_TENSILE_LIBPATH="$PATCHD" HIP_VISIBLE_DEVICES="$CARD" "$B" -m "$N" -n "$M" -k "$K" \
   --lda "$K" --ldb "$K" --ldc "$N" --ldd "$N" --transA "$TRANSA" --transB "$TRANSB" \
-  -r "$DTYPE" -a "$DTYPE" -b "$DTYPE" -c "$DTYPE" -d "$DTYPE" \
-  --compute_type "$COMPUTE" --activation_type None --iters 3 --cold_iters 1 --verify 2>&1 \
-  | grep -iE "norm|error|verify|pass|fail" | head -3
+  -r "$DTYPE" --a_type "$DTYPE" --b_type "$DTYPE" --c_type "$DTYPE" --d_type "$DTYPE" \
+  --compute_type "$COMPUTE" --activation_type None --iters 3 --cold_iters 1 --verify 2>&1)
+NORM_LINE=$(echo "$VOUT" | awk -F, '
+  { n=NF; row[++r]=$0 }
+  END {
+    hdr=-1
+    for(i=1;i<=r;i++) if(row[i] ~ /transA,transB/ && row[i] ~ /norm_error/){ hdr=i; break }
+    if(hdr<0){ print "  ⚠️ 未找到 verify 表头行——norm 未校验(检查 bench 是否真跑了 --verify)"; exit 0 }
+    nfe=na=nrt=-1
+    nh=split(row[hdr], h, ",")
+    for(c=1;c<=nh;c++){ if(h[c]=="norm_error")nfe=c; if(h[c]=="atol")na=c; if(h[c]=="rtol")nrt=c }
+    split(row[hdr+1], d, ",")
+    if(nfe<0 || hdr+1>r){ print "  ⚠️ 无数据行/norm_error 列——norm 未校验"; exit 0 }
+    ne=d[nfe]+0; at=(na>0?d[na]:""); rt=(nrt>0?d[nrt]:"")
+    printf "  norm_error = %s   (atol=%s rtol=%s)\n", d[nfe], at, rt
+    # slc 是 bit-exact 策略位 → 期望 norm_error 与 clean 同量级(~1e-5, bf16 舍入)。
+    # 阈值: <=1e-4 判 PASS(无损); >1e-4 可能是 patch 打错字节/打错组, 直接标 FAIL。
+    if(ne<=1e-4) printf "  ✓ PASS: norm_error=%.3g ≤ 1e-4 (无损, 与 clean 同量级)\n", ne
+    else          printf "  ✗ FAIL: norm_error=%.3g > 1e-4 → patch 可能打错字节/打错组, 别采信计时!\n", ne
+  }')
+echo "${NORM_LINE:-  ⚠️ norm 未解析}"
 
 TS=$(date '+%Y-%m-%d %H:%M')
 { echo ""; echo "## $TS  slc A/B ($CARD, $N/$K/$M, $PATCH)"; \
-  echo "kernel=$KERNEL"; echo "见上方中位/norm 输出。"; } >> "$PERF_LOG"
+  echo "kernel=$KERNEL"; echo "${NORM_LINE:- norm 未解析}"; echo "见上方中位/逐轮输出。"; } >> "$PERF_LOG"
 echo "  perf-log: $PERF_LOG"
 echo "  ⚠️ 收益须满足: patched 先跑的轮次也照样快 (见第 6 步逐轮)。Δ 为正且 norm 通过才算数。"

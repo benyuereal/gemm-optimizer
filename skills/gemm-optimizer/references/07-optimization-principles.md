@@ -224,28 +224,30 @@ gfx900 系 `buffer_load` 指令 **word0** 的缓存策略位（本例只动 bit1
 
 ![gfx900 buffer_load word0 的 cache hint 位 SLC(bit17)，两种形态翻的都是 bit17，通用改法 `word0 |= 0x20000`](../assets/buffer_load_cache_hints.png)
 
-**汇编源码怎么写**（本机 DTK clang 18 实汇编 + objdump 回验）。slc 是加在 `offen` 后的**关键字**，
-**只打在 K-loop 流式读权重那组（idxen 型）**——prologue 的 lds 型只是"要会认"，不是 patch 目标：
+**汇编源码怎么写**（本机 DTK clang 18 实汇编 + objdump 回验；下面 idxen 行是 bf16 gate_up M=32
+winner 的**真实反汇编**）。slc 是加在 `offen` 后的**关键字**，**只打在 K-loop 流式读权重那组
+（idxen 型）**——prologue 的 lds 型只是"要会认"，不是 patch 目标：
 
 ```asm
-; ★ 目标：K-loop 流式读大权重（idxen 型，word0 高字节 0x5C）——生产就改这一组
-  buffer_load_dwordx4  v[28:31], v26, s[8:11], 0 offen        ; clean → E05C1000
-  buffer_load_dwordx4  v[28:31], v26, s[8:11], 0 offen slc    ; ★ 加 slc → E05E1000 (0x5C→0x5E)
+; ★ 目标：K-loop 流式读大权重（idxen 型，word0 高字节 0x5C）——生产就改这一组（gate_up 共 20 条）
+  buffer_load_dwordx4  v[96:99], v[228:229], s[12:15], 0 idxen offen      ; clean → E05C3000
+  buffer_load_dwordx4  v[96:99], v[228:229], s[12:15], 0 idxen offen slc  ; ★ 加 slc → E05E3000 (0x5C→0x5E)
 
 ; 只是要会认：prologue 直接写 LDS（lds 型，带 lds 后缀，word0 高字节 0x5D）——生产**不**加 slc
-  buffer_load_dwordx4  v26, s[8:11], 0 offen lds              ; E05D1000（bf16 gate_up 仅 8 条，改了收益趋零）
+  buffer_load_dwordx4  v128, s[8:11], 0 offen lds                         ; E05D1000（gate_up 仅 8 条，改了收益趋零）
 ```
 
 > **要点**
-> - slc 在**源码里就是关键字 `slc`**，紧跟 `offen` 后面（`offen slc`）；等价 `word0 |= 0x20000`（翻 word0
->   bit17），汇编后 word0 高字节 `0x5C→0x5E`，word1 原样不动，bit-exact 无损。
-> - **objdump 反汇编时不打印 `slc` token**——只印 `offen`/`lds`。所以读生产 `.co` 反汇编认 slc
->   **只能看 word0 编码字节**（`0x5E` 高字节，或程序里 `word0 & 0x20000`）；写汇编改 slc 则直接加关键字。
-> - word0 低 16 位是 kernel-specific 立即数（本例 `0x1000`；生产 M=32 gate_up idxen 是 `0x3000`），随
->   kernel 变——grep 锚点认**高字节**，低 16 位按各自 kernel 实测，不能照搬（03 篇"先反汇编数清"）。
+> - slc 在**源码里就是关键字 `slc`**，紧跟 `offen` 后面（idxen 型 `idxen offen slc`，lds 型 `offen slc lds`）；
+>   等价 `word0 |= 0x20000`（翻 word0 bit17），汇编后 word0 高字节 `0x5C→0x5E`，word1 原样不动，bit-exact 无损。
+> - **本机 aillvm `llvm-objdump` 会重新打印 `slc`**——patched 反汇编里能直接看到 `... idxen offen slc`。
+>   但**认"该打哪组 / 打没打对"仍以 word0 高字节（`0x5E`）或 `word0 & 0x20000` 为准**（不同 DTK 的 objdump
+>   未必都印这个关键字；字节是稳的）。
+> - word0 低 16 位是 kernel-specific 立即数（gate_up idxen = `0x3000`），随 kernel 变——grep 锚点认
+>   **高字节**，低 16 位按各自 kernel 实测，不能照搬（03 篇"先反汇编数清"）。
 
-**怎么定位到该改的那组**（`objdump` 反汇编目标 kernel 区，数 `buffer_load_dwordx4`，
-bf16 gate_up M=32 winner `..._MT128x32x128_SE_K1_thread384` 为例）：
+**怎么定位到该改的那组**（数 `buffer_load_dwordx4` 分几组；反汇编命令见 03 篇。
+以 bf16 gate_up M=32 winner `..._MT128x32x128_SE_K1_thread384` 为例）：
 
 1. **认形态**：word0 高字节 `0x5C` = idxen 型（K-loop 流式读大权重，主体）；`0x5D` = lds 型
    （prologue 直写 LDS，一次性、量小）。

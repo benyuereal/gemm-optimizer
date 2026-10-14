@@ -7,7 +7,8 @@
 
 | 用途 | 工具 |
 |------|------|
-| 生产库 | `/opt/dtk/lib/hipblaslt/library_bw_nmz/FusedMatmulKernel_gfx938.co`（目录随 DTK 变，`find /opt/dtk -name 'FusedMatmulKernel*.co'` 定位） |
+| 生产库 (FP8 FusedMatmul) | `/opt/dtk/lib/hipblaslt/library_bw_nmz/FusedMatmulKernel_gfx938.co`（目录随 DTK 变，`find /opt/dtk -name 'FusedMatmulKernel*.co'` 定位） |
+| 生产库 (bf16/fp16 Tensile Cijk) | `/opt/dtk/lib/hipblaslt/library_gfx938/TensileLibrary_gfx938.co`（bf16 slc 主战场，一键走 `scripts/slc_ab.sh`） |
 | 汇编 | `/opt/dtk/aillvm/bin/clang -x assembler --target=amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=gfx938 -mwavefrontsize64 -c x.s -o x.o` |
 | 读符 | `/opt/dtk/llvm/bin/llvm-readelf -s`（符号表） |
 | 反汇编 | `/opt/dtk/aillvm/bin/llvm-objdump -d`（大文件先 `> /tmp/dump.txt` 再 grep，别直接管道刷屏） |
